@@ -14,7 +14,9 @@
     "@babji/types": "workspace:*",
     "@babji/db": "workspace:*",
     "drizzle-orm": "^0.38.0",
-    "grammy": "^1.30.0"
+    "grammy": "^1.30.0",
+    "baileys": "^6.7.21",
+    "@hapi/boom": "^10.0.0"
   },
   "devDependencies": {
     "tsx": "^4.0.0",
