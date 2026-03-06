@@ -1,0 +1,84 @@
+name: google_calendar
+display_name: Google Calendar
+description: Manage calendar events, check availability, and schedule meetings
+requires_auth:
+  provider: google
+  scopes:
+    - https://www.googleapis.com/auth/calendar
+    - https://www.googleapis.com/auth/calendar.events
+actions:
+  - name: list_events
+    description: List upcoming calendar events within a date range
+    parameters:
+      calendar_id:
+        type: string
+        description: Calendar ID (defaults to "primary")
+      time_min:
+        type: string
+        description: Start of time range in ISO 8601 format
+      time_max:
+        type: string
+        description: End of time range in ISO 8601 format
+      max_results:
+        type: number
+        default: 10
+  - name: create_event
+    description: Create a new calendar event
+    parameters:
+      summary:
+        type: string
+        required: true
+      start:
+        type: string
+        required: true
+        description: Start time in ISO 8601 format
+      end:
+        type: string
+        required: true
+        description: End time in ISO 8601 format
+      description:
+        type: string
+      location:
+        type: string
+      attendees:
+        type: array
+        description: List of attendee email addresses
+      calendar_id:
+        type: string
+        description: Calendar ID (defaults to "primary")
+  - name: update_event
+    description: Update an existing calendar event
+    parameters:
+      event_id:
+        type: string
+        required: true
+      summary:
+        type: string
+      start:
+        type: string
+        description: Start time in ISO 8601 format
+      end:
+        type: string
+        description: End time in ISO 8601 format
+      description:
+        type: string
+      location:
+        type: string
+      calendar_id:
+        type: string
+        description: Calendar ID (defaults to "primary")
+  - name: find_free_slots
+    description: Find available time slots across calendars
+    parameters:
+      time_min:
+        type: string
+        required: true
+        description: Start of time range in ISO 8601 format
+      time_max:
+        type: string
+        required: true
+        description: End of time range in ISO 8601 format
+      calendar_ids:
+        type: array
+        description: List of calendar IDs to check (defaults to ["primary"])
+credits_per_action: 1
