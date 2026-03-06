@@ -12,6 +12,11 @@ import { MessageHandler } from "./message-handler.js";
 async function main() {
   const config = loadConfig();
 
+  // Validate critical config
+  if (!config.encryptionKey) {
+    console.warn("WARNING: ENCRYPTION_KEY not set. Token encryption will not work.");
+  }
+
   // Initialize shared services
   const { db, close } = createDb(config.databaseUrl);
   const memory = new MemoryManager(config.memoryBaseDir);
@@ -22,20 +27,18 @@ async function main() {
   const llm = new MultiModelLlmClient({
     primaryProvider: "anthropic",
     fallbackProviders: ["openai", "google"],
-    anthropicApiKey: process.env.ANTHROPIC_API_KEY,
-    openaiApiKey: process.env.OPENAI_API_KEY,
-    googleApiKey: process.env.GOOGLE_API_KEY,
+    anthropicApiKey: config.anthropicApiKey,
+    openaiApiKey: config.openaiApiKey,
+    googleApiKey: config.googleApiKey,
   });
 
   const tenantResolver = new TenantResolver(db);
 
   // Create message handler (end-to-end pipeline)
   const handler = new MessageHandler({
-    db,
     memory,
     sessions,
     credits,
-    vault,
     llm,
     availableSkills: [], // TODO: load from skill registry
   });
