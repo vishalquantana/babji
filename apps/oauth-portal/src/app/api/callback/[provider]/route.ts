@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { redirect } from "next/navigation";
 import { getProvider } from "@/lib/providers";
 
 export async function GET(
@@ -18,14 +19,11 @@ export async function GET(
   const error = searchParams.get("error");
 
   if (error) {
-    return new NextResponse(
-      `<html><body style="font-family:system-ui;max-width:480px;margin:4rem auto;text-align:center">
-        <h1>Connection Failed</h1>
-        <p>The connection was not completed: ${error}</p>
-        <p style="color:#999">You can try again using the link from Babji.</p>
-      </body></html>`,
-      { headers: { "Content-Type": "text/html" } }
-    );
+    const resultUrl = new URL("/connect/result", request.nextUrl.origin);
+    resultUrl.searchParams.set("status", "error");
+    resultUrl.searchParams.set("provider", providerName);
+    resultUrl.searchParams.set("error", error);
+    redirect(resultUrl.pathname + resultUrl.search);
   }
 
   if (!code || !state) {
@@ -36,15 +34,7 @@ export async function GET(
   // TODO: Encrypt tokens using @babji/crypto TokenVault
   // TODO: Store connection in database
   // TODO: Notify Gateway to message user
+  // TODO: Verify state parameter with HMAC signature to prevent CSRF
 
-  console.log(`OAuth callback for ${providerName}: code=${code?.slice(0, 10)}...`);
-
-  return new NextResponse(
-    `<html><body style="font-family:system-ui;max-width:480px;margin:4rem auto;text-align:center">
-      <h1 style="color:#16a34a">Connected!</h1>
-      <p>Your <strong>${provider.displayName}</strong> account is now connected to Babji.</p>
-      <p style="color:#666">You can close this tab and return to your chat.</p>
-    </body></html>`,
-    { headers: { "Content-Type": "text/html" } }
-  );
+  redirect(`/connect/result?status=success&provider=${encodeURIComponent(providerName)}`);
 }
