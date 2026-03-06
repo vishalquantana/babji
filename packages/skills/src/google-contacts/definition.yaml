@@ -1,0 +1,50 @@
+name: google_contacts
+display_name: Google Contacts
+description: Search, create, and manage contacts
+requires_auth:
+  provider: google
+  scopes:
+    - https://www.googleapis.com/auth/contacts
+actions:
+  - name: search_contacts
+    description: Search contacts by name, email, or phone number
+    parameters:
+      query:
+        type: string
+        required: true
+        description: Search query string
+      max_results:
+        type: number
+        default: 10
+  - name: create_contact
+    description: Create a new contact
+    parameters:
+      given_name:
+        type: string
+        required: true
+      family_name:
+        type: string
+      email:
+        type: string
+      phone:
+        type: string
+      organization:
+        type: string
+  - name: update_contact
+    description: Update an existing contact
+    parameters:
+      resource_name:
+        type: string
+        required: true
+        description: Contact resource name (e.g., "people/c1234567890")
+      given_name:
+        type: string
+      family_name:
+        type: string
+      email:
+        type: string
+      phone:
+        type: string
+      organization:
+        type: string
+credits_per_action: 1
