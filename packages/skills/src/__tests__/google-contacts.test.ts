@@ -225,6 +225,19 @@ describe("GoogleContactsHandler", () => {
         handler.execute("update_contact", { resource_name: "people/c999" })
       ).rejects.toThrow("GoogleContacts update_contact failed: contact not found");
     });
+
+    it("rejects update with no updatable fields", async () => {
+      mockGetContact.mockResolvedValue({
+        data: {
+          etag: "abc123",
+          names: [{ givenName: "Old", familyName: "Name" }],
+        },
+      });
+
+      await expect(
+        handler.execute("update_contact", { resource_name: "people/c123" })
+      ).rejects.toThrow("At least one updatable field must be provided");
+    });
   });
 
   // -------- unknown action --------

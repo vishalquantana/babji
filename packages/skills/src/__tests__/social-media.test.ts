@@ -70,7 +70,13 @@ describe("InstagramHandler", () => {
 
       await expect(
         handler.execute("get_profile", { ig_user_id: "ig123" })
-      ).rejects.toThrow("Instagram get_profile failed: HTTP 401: unauthorized");
+      ).rejects.toThrow("Instagram get_profile failed: HTTP 401");
+    });
+
+    it("rejects invalid ig_user_id characters", async () => {
+      await expect(
+        handler.execute("get_profile", { ig_user_id: "ig123; DROP TABLE" })
+      ).rejects.toThrow("Invalid ig_user_id: contains disallowed characters");
     });
   });
 
@@ -109,7 +115,8 @@ describe("InstagramHandler", () => {
       });
 
       expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining("limit=50")
+        expect.stringContaining("limit=50"),
+        expect.any(Object)
       );
     });
 
@@ -122,7 +129,8 @@ describe("InstagramHandler", () => {
       });
 
       expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining("limit=1")
+        expect.stringContaining("limit=1"),
+        expect.any(Object)
       );
     });
 
@@ -137,7 +145,7 @@ describe("InstagramHandler", () => {
 
       await expect(
         handler.execute("list_posts", { ig_user_id: "ig123" })
-      ).rejects.toThrow("Instagram list_posts failed: HTTP 400: bad request");
+      ).rejects.toThrow("Instagram list_posts failed: HTTP 400");
     });
   });
 
@@ -183,7 +191,7 @@ describe("InstagramHandler", () => {
           ig_user_id: "ig123",
           image_url: "https://example.com/bad.jpg",
         })
-      ).rejects.toThrow("Instagram create_post failed: HTTP 400: invalid image url");
+      ).rejects.toThrow("Instagram create_post failed: HTTP 400");
     });
   });
 
@@ -241,7 +249,19 @@ describe("FacebookPagesHandler", () => {
       await handler.execute("list_pages", { max_results: 999 });
 
       expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining("limit=50")
+        expect.stringContaining("limit=50"),
+        expect.any(Object)
+      );
+    });
+
+    it("does not request access_token in fields", async () => {
+      mockFetchOk({ data: [] });
+
+      await handler.execute("list_pages", {});
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.not.stringContaining("access_token"),
+        expect.any(Object)
       );
     });
 
@@ -250,7 +270,7 @@ describe("FacebookPagesHandler", () => {
 
       await expect(
         handler.execute("list_pages", {})
-      ).rejects.toThrow("FacebookPages list_pages failed: HTTP 401: unauthorized");
+      ).rejects.toThrow("FacebookPages list_pages failed: HTTP 401");
     });
   });
 
@@ -305,7 +325,16 @@ describe("FacebookPagesHandler", () => {
           page_id: "page1",
           message: "Hello",
         })
-      ).rejects.toThrow("FacebookPages create_post failed: HTTP 403: page permissions error");
+      ).rejects.toThrow("FacebookPages create_post failed: HTTP 403");
+    });
+
+    it("rejects invalid page_id characters", async () => {
+      await expect(
+        handler.execute("create_post", {
+          page_id: "page1/../admin",
+          message: "Hello",
+        })
+      ).rejects.toThrow("Invalid page_id: contains disallowed characters");
     });
   });
 
@@ -341,7 +370,7 @@ describe("FacebookPagesHandler", () => {
 
       await expect(
         handler.execute("get_insights", { page_id: "page1" })
-      ).rejects.toThrow("FacebookPages get_insights failed: HTTP 400: invalid metric");
+      ).rejects.toThrow("FacebookPages get_insights failed: HTTP 400");
     });
   });
 
@@ -390,7 +419,7 @@ describe("LinkedInHandler", () => {
 
       await expect(
         handler.execute("get_profile", {})
-      ).rejects.toThrow("LinkedIn get_profile failed: HTTP 401: invalid token");
+      ).rejects.toThrow("LinkedIn get_profile failed: HTTP 401");
     });
   });
 
@@ -423,7 +452,13 @@ describe("LinkedInHandler", () => {
 
       await expect(
         handler.execute("create_post", { text: "Hello" })
-      ).rejects.toThrow("LinkedIn create_post failed: HTTP 403: forbidden");
+      ).rejects.toThrow("LinkedIn create_post failed: HTTP 403");
+    });
+
+    it("rejects invalid visibility", async () => {
+      await expect(
+        handler.execute("create_post", { text: "Hello", visibility: "PRIVATE" })
+      ).rejects.toThrow("Invalid visibility: PRIVATE. Must be one of: PUBLIC, CONNECTIONS");
     });
   });
 
@@ -480,7 +515,7 @@ describe("LinkedInHandler", () => {
 
       await expect(
         handler.execute("list_posts", {})
-      ).rejects.toThrow("LinkedIn list_posts failed: HTTP 500: server error");
+      ).rejects.toThrow("LinkedIn list_posts failed: HTTP 500");
     });
   });
 
@@ -533,7 +568,7 @@ describe("XHandler", () => {
 
       await expect(
         handler.execute("get_profile", {})
-      ).rejects.toThrow("X get_profile failed: HTTP 401: unauthorized");
+      ).rejects.toThrow("X get_profile failed: HTTP 401");
     });
   });
 
@@ -577,7 +612,14 @@ describe("XHandler", () => {
 
       await expect(
         handler.execute("create_tweet", { text: "Hello" })
-      ).rejects.toThrow("X create_tweet failed: HTTP 403: duplicate tweet");
+      ).rejects.toThrow("X create_tweet failed: HTTP 403");
+    });
+
+    it("rejects tweet text exceeding 280 characters", async () => {
+      const longText = "a".repeat(281);
+      await expect(
+        handler.execute("create_tweet", { text: longText })
+      ).rejects.toThrow("Tweet text exceeds 280 character limit");
     });
   });
 
@@ -636,7 +678,7 @@ describe("XHandler", () => {
 
       await expect(
         handler.execute("list_tweets", {})
-      ).rejects.toThrow("X list_tweets failed: HTTP 429: rate limited");
+      ).rejects.toThrow("X list_tweets failed: HTTP 429");
     });
   });
 

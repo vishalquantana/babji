@@ -33,6 +33,12 @@ export class LinkedInHandler implements SkillHandler {
     }
   }
 
+  private validateId(value: string, name: string): void {
+    if (!/^[\w:.-]+$/.test(value)) {
+      throw new Error(`Invalid ${name}: contains disallowed characters`);
+    }
+  }
+
   private wrapApiError(action: string, err: unknown): never {
     const message = err instanceof Error ? err.message : "unknown error";
     throw new Error(`LinkedIn ${action} failed: ${message}`);
@@ -48,7 +54,14 @@ export class LinkedInHandler implements SkillHandler {
 
     if (!res.ok) {
       const errorBody = await res.text();
-      throw new Error(`HTTP ${res.status}: ${errorBody}`);
+      let errorMsg: string;
+      try {
+        const parsed = JSON.parse(errorBody);
+        errorMsg = parsed.error?.message || parsed.error_description || `HTTP ${res.status}`;
+      } catch {
+        errorMsg = `HTTP ${res.status}`;
+      }
+      throw new Error(errorMsg);
     }
 
     return res.json();
@@ -67,12 +80,23 @@ export class LinkedInHandler implements SkillHandler {
 
     if (!res.ok) {
       const errorBody = await res.text();
-      throw new Error(`HTTP ${res.status}: ${errorBody}`);
+      let errorMsg: string;
+      try {
+        const parsed = JSON.parse(errorBody);
+        errorMsg = parsed.error?.message || parsed.error_description || `HTTP ${res.status}`;
+      } catch {
+        errorMsg = `HTTP ${res.status}`;
+      }
+      throw new Error(errorMsg);
     }
 
     // LinkedIn POST may return 201 with empty body or JSON
     const text = await res.text();
-    return text ? JSON.parse(text) : {};
+    try {
+      return text ? JSON.parse(text) : {};
+    } catch {
+      throw new Error("Malformed response from LinkedIn API");
+    }
   }
 
   private async getProfile() {
@@ -107,6 +131,11 @@ export class LinkedInHandler implements SkillHandler {
   private async createPost(params: Record<string, unknown>) {
     const text = params.text as string;
     const visibility = (params.visibility as string) || "PUBLIC";
+
+    const validVisibilities = ["PUBLIC", "CONNECTIONS"];
+    if (!validVisibilities.includes(visibility)) {
+      throw new Error(`Invalid visibility: ${visibility}. Must be one of: ${validVisibilities.join(", ")}`);
+    }
 
     try {
       // First get the user's URN

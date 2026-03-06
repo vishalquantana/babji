@@ -33,6 +33,12 @@ export class XHandler implements SkillHandler {
     }
   }
 
+  private validateId(value: string, name: string): void {
+    if (!/^[\w:.-]+$/.test(value)) {
+      throw new Error(`Invalid ${name}: contains disallowed characters`);
+    }
+  }
+
   private wrapApiError(action: string, err: unknown): never {
     const message = err instanceof Error ? err.message : "unknown error";
     throw new Error(`X ${action} failed: ${message}`);
@@ -47,7 +53,14 @@ export class XHandler implements SkillHandler {
 
     if (!res.ok) {
       const errorBody = await res.text();
-      throw new Error(`HTTP ${res.status}: ${errorBody}`);
+      let errorMsg: string;
+      try {
+        const parsed = JSON.parse(errorBody);
+        errorMsg = parsed.error?.message || parsed.error_description || `HTTP ${res.status}`;
+      } catch {
+        errorMsg = `HTTP ${res.status}`;
+      }
+      throw new Error(errorMsg);
     }
 
     return res.json();
@@ -65,7 +78,14 @@ export class XHandler implements SkillHandler {
 
     if (!res.ok) {
       const errorBody = await res.text();
-      throw new Error(`HTTP ${res.status}: ${errorBody}`);
+      let errorMsg: string;
+      try {
+        const parsed = JSON.parse(errorBody);
+        errorMsg = parsed.error?.message || parsed.error_description || `HTTP ${res.status}`;
+      } catch {
+        errorMsg = `HTTP ${res.status}`;
+      }
+      throw new Error(errorMsg);
     }
 
     return res.json();
@@ -99,11 +119,15 @@ export class XHandler implements SkillHandler {
 
   private async createTweet(params: Record<string, unknown>) {
     const text = params.text as string;
+    if (text.length > 280) {
+      throw new Error("Tweet text exceeds 280 character limit");
+    }
     const replyTo = params.reply_to as string | undefined;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const body: Record<string, any> = { text };
     if (replyTo) {
+      this.validateId(replyTo, "reply_to");
       body.reply = { in_reply_to_tweet_id: replyTo };
     }
 
@@ -134,6 +158,7 @@ export class XHandler implements SkillHandler {
       if (!userId) {
         throw new Error("Could not determine user ID");
       }
+      this.validateId(userId, "user_id");
 
       const data = await this.apiGet(
         `${X_API_BASE}/users/${userId}/tweets?max_results=${maxResults}&tweet.fields=id,text,created_at,public_metrics`

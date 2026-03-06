@@ -101,7 +101,13 @@ describe("GoogleAdsHandler", () => {
 
       await expect(
         handler.execute("list_campaigns", { customer_id: "123" })
-      ).rejects.toThrow("GoogleAds list_campaigns failed: HTTP 401: unauthorized");
+      ).rejects.toThrow("GoogleAds list_campaigns failed: HTTP 401");
+    });
+
+    it("rejects invalid customer_id characters", async () => {
+      await expect(
+        handler.execute("list_campaigns", { customer_id: "123; DROP" })
+      ).rejects.toThrow("Invalid customer_id: contains disallowed characters");
     });
   });
 
@@ -127,7 +133,7 @@ describe("GoogleAdsHandler", () => {
 
       const result = (await handler.execute("get_campaign_report", {
         customer_id: "123",
-        campaign_id: "camp1",
+        campaign_id: "456",
         start_date: "2025-01-01",
         end_date: "2025-01-31",
       })) as { report: Array<Record<string, unknown>>; dateRange: { startDate: string; endDate: string } };
@@ -185,11 +191,44 @@ describe("GoogleAdsHandler", () => {
       await expect(
         handler.execute("get_campaign_report", {
           customer_id: "123",
+          campaign_id: "456",
+          start_date: "2025-01-01",
+          end_date: "2025-01-31",
+        })
+      ).rejects.toThrow("GoogleAds get_campaign_report failed: HTTP 400");
+    });
+
+    it("rejects non-numeric campaign_id", async () => {
+      await expect(
+        handler.execute("get_campaign_report", {
+          customer_id: "123",
           campaign_id: "camp1",
           start_date: "2025-01-01",
           end_date: "2025-01-31",
         })
-      ).rejects.toThrow("GoogleAds get_campaign_report failed: HTTP 400: bad request");
+      ).rejects.toThrow("Invalid campaign_id: must be numeric");
+    });
+
+    it("rejects invalid start_date format", async () => {
+      await expect(
+        handler.execute("get_campaign_report", {
+          customer_id: "123",
+          campaign_id: "456",
+          start_date: "01-01-2025",
+          end_date: "2025-01-31",
+        })
+      ).rejects.toThrow("Invalid start_date: must be in YYYY-MM-DD format");
+    });
+
+    it("rejects invalid end_date format", async () => {
+      await expect(
+        handler.execute("get_campaign_report", {
+          customer_id: "123",
+          campaign_id: "456",
+          start_date: "2025-01-01",
+          end_date: "Jan 31, 2025",
+        })
+      ).rejects.toThrow("Invalid end_date: must be in YYYY-MM-DD format");
     });
   });
 
@@ -208,12 +247,12 @@ describe("GoogleAdsHandler", () => {
 
       const result = (await handler.execute("update_budget", {
         customer_id: "123",
-        campaign_id: "camp1",
+        campaign_id: "789",
         budget_amount_micros: 10000000,
       })) as { updated: boolean; campaignId: string; budgetAmountMicros: number };
 
       expect(result.updated).toBe(true);
-      expect(result.campaignId).toBe("camp1");
+      expect(result.campaignId).toBe("789");
       expect(result.budgetAmountMicros).toBe(10000000);
     });
 
@@ -223,10 +262,10 @@ describe("GoogleAdsHandler", () => {
       await expect(
         handler.execute("update_budget", {
           customer_id: "123",
-          campaign_id: "bad",
+          campaign_id: "999",
           budget_amount_micros: 5000000,
         })
-      ).rejects.toThrow("GoogleAds update_budget failed: Campaign bad not found");
+      ).rejects.toThrow("GoogleAds update_budget failed: Campaign 999 not found");
     });
 
     it("requires customer_id parameter", async () => {
@@ -251,7 +290,7 @@ describe("GoogleAdsHandler", () => {
       await expect(
         handler.execute("update_budget", {
           customer_id: "123",
-          campaign_id: "camp1",
+          campaign_id: "789",
         })
       ).rejects.toThrow("Missing required parameter: budget_amount_micros for update_budget");
     });
@@ -262,10 +301,20 @@ describe("GoogleAdsHandler", () => {
       await expect(
         handler.execute("update_budget", {
           customer_id: "123",
+          campaign_id: "789",
+          budget_amount_micros: 5000000,
+        })
+      ).rejects.toThrow("GoogleAds update_budget failed: HTTP 403");
+    });
+
+    it("rejects non-numeric campaign_id", async () => {
+      await expect(
+        handler.execute("update_budget", {
+          customer_id: "123",
           campaign_id: "camp1",
           budget_amount_micros: 5000000,
         })
-      ).rejects.toThrow("GoogleAds update_budget failed: HTTP 403: forbidden");
+      ).rejects.toThrow("Invalid campaign_id: must be numeric");
     });
   });
 

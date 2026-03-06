@@ -105,7 +105,13 @@ describe("MetaAdsHandler", () => {
 
       await expect(
         handler.execute("list_campaigns", { ad_account_id: "act_123" })
-      ).rejects.toThrow("MetaAds list_campaigns failed: HTTP 401: invalid token");
+      ).rejects.toThrow("MetaAds list_campaigns failed: HTTP 401");
+    });
+
+    it("rejects invalid ad_account_id characters", async () => {
+      await expect(
+        handler.execute("list_campaigns", { ad_account_id: "act_123; DROP TABLE" })
+      ).rejects.toThrow("Invalid ad_account_id: contains disallowed characters");
     });
   });
 
@@ -175,7 +181,40 @@ describe("MetaAdsHandler", () => {
           start_date: "2025-01-01",
           end_date: "2025-01-31",
         })
-      ).rejects.toThrow("MetaAds get_campaign_insights failed: HTTP 400: bad request");
+      ).rejects.toThrow("MetaAds get_campaign_insights failed: HTTP 400");
+    });
+
+    it("rejects invalid date format for start_date", async () => {
+      await expect(
+        handler.execute("get_campaign_insights", {
+          campaign_id: "camp1",
+          start_date: "01-01-2025",
+          end_date: "2025-01-31",
+        })
+      ).rejects.toThrow("Invalid start_date: must be in YYYY-MM-DD format");
+    });
+
+    it("rejects invalid date format for end_date", async () => {
+      await expect(
+        handler.execute("get_campaign_insights", {
+          campaign_id: "camp1",
+          start_date: "2025-01-01",
+          end_date: "Jan 31, 2025",
+        })
+      ).rejects.toThrow("Invalid end_date: must be in YYYY-MM-DD format");
+    });
+
+    it("encodes time_range parameter in URL", async () => {
+      mockFetchOk({ data: [] });
+
+      await handler.execute("get_campaign_insights", {
+        campaign_id: "camp1",
+        start_date: "2025-01-01",
+        end_date: "2025-01-31",
+      });
+
+      const url = mockFetch.mock.calls[0][0] as string;
+      expect(url).toContain("time_range=" + encodeURIComponent(JSON.stringify({ since: "2025-01-01", until: "2025-01-31" })));
     });
   });
 
@@ -224,7 +263,7 @@ describe("MetaAdsHandler", () => {
           campaign_id: "camp1",
           status: "ACTIVE",
         })
-      ).rejects.toThrow("MetaAds update_campaign_status failed: HTTP 403: insufficient permissions");
+      ).rejects.toThrow("MetaAds update_campaign_status failed: HTTP 403");
     });
   });
 

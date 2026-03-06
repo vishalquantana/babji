@@ -36,18 +36,34 @@ export class InstagramHandler implements SkillHandler {
     }
   }
 
+  private validateId(value: string, name: string): void {
+    if (!/^[\w:.-]+$/.test(value)) {
+      throw new Error(`Invalid ${name}: contains disallowed characters`);
+    }
+  }
+
   private wrapApiError(action: string, err: unknown): never {
     const message = err instanceof Error ? err.message : "unknown error";
     throw new Error(`Instagram ${action} failed: ${message}`);
   }
 
   private async apiGet(url: string): Promise<unknown> {
-    const separator = url.includes("?") ? "&" : "?";
-    const res = await fetch(`${url}${separator}access_token=${this.accessToken}`);
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${this.accessToken}`,
+      },
+    });
 
     if (!res.ok) {
       const errorBody = await res.text();
-      throw new Error(`HTTP ${res.status}: ${errorBody}`);
+      let errorMsg: string;
+      try {
+        const parsed = JSON.parse(errorBody);
+        errorMsg = parsed.error?.message || parsed.error_description || `HTTP ${res.status}`;
+      } catch {
+        errorMsg = `HTTP ${res.status}`;
+      }
+      throw new Error(errorMsg);
     }
 
     return res.json();
@@ -56,13 +72,23 @@ export class InstagramHandler implements SkillHandler {
   private async apiPost(url: string, body: Record<string, unknown>): Promise<unknown> {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...body, access_token: this.accessToken }),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.accessToken}`,
+      },
+      body: JSON.stringify(body),
     });
 
     if (!res.ok) {
       const errorBody = await res.text();
-      throw new Error(`HTTP ${res.status}: ${errorBody}`);
+      let errorMsg: string;
+      try {
+        const parsed = JSON.parse(errorBody);
+        errorMsg = parsed.error?.message || parsed.error_description || `HTTP ${res.status}`;
+      } catch {
+        errorMsg = `HTTP ${res.status}`;
+      }
+      throw new Error(errorMsg);
     }
 
     return res.json();
@@ -70,6 +96,7 @@ export class InstagramHandler implements SkillHandler {
 
   private async getProfile(params: Record<string, unknown>) {
     const igUserId = params.ig_user_id as string;
+    this.validateId(igUserId, "ig_user_id");
 
     try {
       const data = await this.apiGet(
@@ -99,6 +126,7 @@ export class InstagramHandler implements SkillHandler {
 
   private async listPosts(params: Record<string, unknown>) {
     const igUserId = params.ig_user_id as string;
+    this.validateId(igUserId, "ig_user_id");
     const maxResults = Math.min(Math.max((params.max_results as number) || 10, 1), 50);
 
     try {
@@ -129,6 +157,7 @@ export class InstagramHandler implements SkillHandler {
 
   private async createPost(params: Record<string, unknown>) {
     const igUserId = params.ig_user_id as string;
+    this.validateId(igUserId, "ig_user_id");
     const imageUrl = params.image_url as string;
     const caption = (params.caption as string) || "";
 

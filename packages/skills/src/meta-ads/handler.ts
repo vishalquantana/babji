@@ -38,6 +38,18 @@ export class MetaAdsHandler implements SkillHandler {
     }
   }
 
+  private validateId(value: string, name: string): void {
+    if (!/^[\w:.-]+$/.test(value)) {
+      throw new Error(`Invalid ${name}: contains disallowed characters`);
+    }
+  }
+
+  private validateDateFormat(value: string, name: string): void {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      throw new Error(`Invalid ${name}: must be in YYYY-MM-DD format`);
+    }
+  }
+
   private wrapApiError(action: string, err: unknown): never {
     const message = err instanceof Error ? err.message : "unknown error";
     throw new Error(`MetaAds ${action} failed: ${message}`);
@@ -52,21 +64,26 @@ export class MetaAdsHandler implements SkillHandler {
       method,
       headers: {
         "Content-Type": "application/json",
+        Authorization: `Bearer ${this.accessToken}`,
       },
     };
 
-    if (method === "GET") {
-      const separator = url.includes("?") ? "&" : "?";
-      url = `${url}${separator}access_token=${this.accessToken}`;
-    } else {
-      options.body = JSON.stringify({ ...body, access_token: this.accessToken });
+    if (method !== "GET") {
+      options.body = JSON.stringify(body);
     }
 
     const res = await fetch(url, options);
 
     if (!res.ok) {
       const errorBody = await res.text();
-      throw new Error(`HTTP ${res.status}: ${errorBody}`);
+      let errorMsg: string;
+      try {
+        const parsed = JSON.parse(errorBody);
+        errorMsg = parsed.error?.message || parsed.error_description || `HTTP ${res.status}`;
+      } catch {
+        errorMsg = `HTTP ${res.status}`;
+      }
+      throw new Error(errorMsg);
     }
 
     return res.json();
@@ -74,6 +91,7 @@ export class MetaAdsHandler implements SkillHandler {
 
   private async listCampaigns(params: Record<string, unknown>) {
     const adAccountId = params.ad_account_id as string;
+    this.validateId(adAccountId, "ad_account_id");
     const maxResults = Math.min(Math.max((params.max_results as number) || 20, 1), 100);
 
     try {
@@ -103,10 +121,16 @@ export class MetaAdsHandler implements SkillHandler {
     const startDate = params.start_date as string;
     const endDate = params.end_date as string;
 
+    this.validateId(campaignId, "campaign_id");
+    this.validateDateFormat(startDate, "start_date");
+    this.validateDateFormat(endDate, "end_date");
+
+    const timeRange = encodeURIComponent(JSON.stringify({ since: startDate, until: endDate }));
+
     try {
       const data = await this.apiRequest(
         "GET",
-        `${GRAPH_API_BASE}/${campaignId}/insights?fields=impressions,clicks,spend,ctr,cpc,conversions,reach&time_range={"since":"${startDate}","until":"${endDate}"}`
+        `${GRAPH_API_BASE}/${campaignId}/insights?fields=impressions,clicks,spend,ctr,cpc,conversions,reach&time_range=${timeRange}`
       );
 
       const responseData = data as { data?: Array<{ impressions?: string; clicks?: string; spend?: string; ctr?: string; cpc?: string; conversions?: string; reach?: string }> };
@@ -128,6 +152,7 @@ export class MetaAdsHandler implements SkillHandler {
 
   private async updateCampaignStatus(params: Record<string, unknown>) {
     const campaignId = params.campaign_id as string;
+    this.validateId(campaignId, "campaign_id");
     const status = params.status as string;
 
     const validStatuses = ["ACTIVE", "PAUSED", "ARCHIVED"];

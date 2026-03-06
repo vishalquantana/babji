@@ -35,18 +35,34 @@ export class FacebookPagesHandler implements SkillHandler {
     }
   }
 
+  private validateId(value: string, name: string): void {
+    if (!/^[\w:.-]+$/.test(value)) {
+      throw new Error(`Invalid ${name}: contains disallowed characters`);
+    }
+  }
+
   private wrapApiError(action: string, err: unknown): never {
     const message = err instanceof Error ? err.message : "unknown error";
     throw new Error(`FacebookPages ${action} failed: ${message}`);
   }
 
   private async apiGet(url: string): Promise<unknown> {
-    const separator = url.includes("?") ? "&" : "?";
-    const res = await fetch(`${url}${separator}access_token=${this.accessToken}`);
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${this.accessToken}`,
+      },
+    });
 
     if (!res.ok) {
       const errorBody = await res.text();
-      throw new Error(`HTTP ${res.status}: ${errorBody}`);
+      let errorMsg: string;
+      try {
+        const parsed = JSON.parse(errorBody);
+        errorMsg = parsed.error?.message || parsed.error_description || `HTTP ${res.status}`;
+      } catch {
+        errorMsg = `HTTP ${res.status}`;
+      }
+      throw new Error(errorMsg);
     }
 
     return res.json();
@@ -55,13 +71,23 @@ export class FacebookPagesHandler implements SkillHandler {
   private async apiPost(url: string, body: Record<string, unknown>): Promise<unknown> {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...body, access_token: this.accessToken }),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.accessToken}`,
+      },
+      body: JSON.stringify(body),
     });
 
     if (!res.ok) {
       const errorBody = await res.text();
-      throw new Error(`HTTP ${res.status}: ${errorBody}`);
+      let errorMsg: string;
+      try {
+        const parsed = JSON.parse(errorBody);
+        errorMsg = parsed.error?.message || parsed.error_description || `HTTP ${res.status}`;
+      } catch {
+        errorMsg = `HTTP ${res.status}`;
+      }
+      throw new Error(errorMsg);
     }
 
     return res.json();
@@ -72,11 +98,11 @@ export class FacebookPagesHandler implements SkillHandler {
 
     try {
       const data = await this.apiGet(
-        `${GRAPH_API_BASE}/me/accounts?fields=id,name,category,fan_count,access_token&limit=${maxResults}`
+        `${GRAPH_API_BASE}/me/accounts?fields=id,name,category,fan_count&limit=${maxResults}`
       );
 
       const responseData = data as { data?: Array<{
-        id?: string; name?: string; category?: string; fan_count?: number; access_token?: string;
+        id?: string; name?: string; category?: string; fan_count?: number;
       }> };
 
       const pages = (responseData.data || []).map((page) => ({
@@ -94,6 +120,7 @@ export class FacebookPagesHandler implements SkillHandler {
 
   private async createPost(params: Record<string, unknown>) {
     const pageId = params.page_id as string;
+    this.validateId(pageId, "page_id");
     const message = params.message as string;
     const link = params.link as string | undefined;
 
@@ -117,6 +144,7 @@ export class FacebookPagesHandler implements SkillHandler {
 
   private async getInsights(params: Record<string, unknown>) {
     const pageId = params.page_id as string;
+    this.validateId(pageId, "page_id");
     const metrics = (params.metrics as string[]) || [
       "page_impressions",
       "page_engaged_users",

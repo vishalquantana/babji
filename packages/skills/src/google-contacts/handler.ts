@@ -149,6 +149,10 @@ export class GoogleContactsHandler implements SkillHandler {
         updatePersonFields.push("organizations");
       }
 
+      if (updatePersonFields.length === 0) {
+        throw new Error("At least one updatable field must be provided (given_name, family_name, email, phone, or organization)");
+      }
+
       const res = await this.people.people.updateContact({
         resourceName,
         updatePersonFields: updatePersonFields.join(","),
