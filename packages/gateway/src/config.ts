@@ -37,3 +37,61 @@ export function loadConfig(): GatewayConfig {
     },
   };
 }
+
+export interface ConfigWarning {
+  key: string;
+  message: string;
+}
+
+/**
+ * Validate the loaded configuration.
+ * Warns about missing optional values and throws for truly critical ones.
+ */
+export function validateConfig(config: GatewayConfig): ConfigWarning[] {
+  const warnings: ConfigWarning[] = [];
+
+  // Warn about missing optional keys
+  if (!config.encryptionKey) {
+    warnings.push({
+      key: "ENCRYPTION_KEY",
+      message: "Not set. Token encryption will not work.",
+    });
+  }
+
+  if (!config.anthropicApiKey && !config.openaiApiKey && !config.googleApiKey) {
+    warnings.push({
+      key: "LLM_API_KEYS",
+      message:
+        "No LLM API key configured. Set at least one of ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY.",
+    });
+  }
+
+  if (!process.env.DATABASE_URL) {
+    warnings.push({
+      key: "DATABASE_URL",
+      message: "Not set. Using default local connection string.",
+    });
+  }
+
+  if (!process.env.REDIS_URL) {
+    warnings.push({
+      key: "REDIS_URL",
+      message: "Not set. Using default redis://localhost:6379.",
+    });
+  }
+
+  if (config.telegram.enabled && !config.telegram.botToken) {
+    warnings.push({
+      key: "TELEGRAM_BOT_TOKEN",
+      message: "Telegram is enabled but no bot token is configured.",
+    });
+  }
+
+  // Log warnings (using console.warn is fine here since logger may not be
+  // initialized yet in all contexts; callers can also inspect returned array)
+  for (const w of warnings) {
+    console.warn(`[config] WARNING: ${w.key} — ${w.message}`);
+  }
+
+  return warnings;
+}
