@@ -1,0 +1,30 @@
+name: linkedin
+display_name: LinkedIn
+description: Manage LinkedIn profile and posts
+requires_auth:
+  provider: linkedin
+  scopes:
+    - openid
+    - profile
+    - w_member_social
+actions:
+  - name: get_profile
+    description: Get the authenticated user's LinkedIn profile
+    parameters: {}
+  - name: create_post
+    description: Create a text post on LinkedIn
+    parameters:
+      text:
+        type: string
+        required: true
+        description: Post content text
+      visibility:
+        type: string
+        description: "Post visibility: PUBLIC or CONNECTIONS (default: PUBLIC)"
+  - name: list_posts
+    description: List recent posts by the authenticated user
+    parameters:
+      max_results:
+        type: number
+        default: 10
+credits_per_action: 1

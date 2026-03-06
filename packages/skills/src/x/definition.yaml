@@ -1,0 +1,30 @@
+name: x
+display_name: X (Twitter)
+description: Manage X/Twitter profile, tweets, and timeline
+requires_auth:
+  provider: x
+  scopes:
+    - tweet.read
+    - tweet.write
+    - users.read
+actions:
+  - name: get_profile
+    description: Get the authenticated user's X profile
+    parameters: {}
+  - name: create_tweet
+    description: Create a new tweet
+    parameters:
+      text:
+        type: string
+        required: true
+        description: Tweet text (max 280 characters)
+      reply_to:
+        type: string
+        description: Tweet ID to reply to
+  - name: list_tweets
+    description: List recent tweets by the authenticated user
+    parameters:
+      max_results:
+        type: number
+        default: 10
+credits_per_action: 1

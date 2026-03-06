@@ -1,0 +1,41 @@
+name: facebook_pages
+display_name: Facebook Pages
+description: Manage Facebook Pages, create posts, and view insights
+requires_auth:
+  provider: meta
+  scopes:
+    - pages_manage_posts
+    - pages_read_engagement
+    - read_insights
+actions:
+  - name: list_pages
+    description: List Facebook Pages managed by the user
+    parameters:
+      max_results:
+        type: number
+        default: 10
+  - name: create_post
+    description: Create a post on a Facebook Page
+    parameters:
+      page_id:
+        type: string
+        required: true
+      message:
+        type: string
+        required: true
+      link:
+        type: string
+        description: Optional URL to include in the post
+  - name: get_insights
+    description: Get performance insights for a Facebook Page
+    parameters:
+      page_id:
+        type: string
+        required: true
+      metrics:
+        type: array
+        description: List of metric names (defaults to page_impressions, page_engaged_users, page_fans)
+      period:
+        type: string
+        description: "Aggregation period: day, week, days_28 (default: day)"
+credits_per_action: 1

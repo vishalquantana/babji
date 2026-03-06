@@ -1,0 +1,42 @@
+name: instagram
+display_name: Instagram
+description: Manage Instagram business profile, posts, and content
+requires_auth:
+  provider: meta
+  scopes:
+    - instagram_basic
+    - instagram_content_publish
+    - pages_read_engagement
+actions:
+  - name: get_profile
+    description: Get Instagram business profile information
+    parameters:
+      ig_user_id:
+        type: string
+        required: true
+        description: Instagram business account user ID
+  - name: list_posts
+    description: List recent Instagram posts
+    parameters:
+      ig_user_id:
+        type: string
+        required: true
+        description: Instagram business account user ID
+      max_results:
+        type: number
+        default: 10
+  - name: create_post
+    description: Create an Instagram post (photo)
+    parameters:
+      ig_user_id:
+        type: string
+        required: true
+        description: Instagram business account user ID
+      image_url:
+        type: string
+        required: true
+        description: Public URL of the image to post
+      caption:
+        type: string
+        description: Post caption text
+credits_per_action: 1
