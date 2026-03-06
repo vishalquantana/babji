@@ -7,3 +7,4 @@ export { InstagramHandler } from "./instagram/index.js";
 export { FacebookPagesHandler } from "./facebook-pages/index.js";
 export { LinkedInHandler } from "./linkedin/index.js";
 export { XHandler } from "./x/index.js";
+export { SkillRequestManager } from "./skill-request-manager.js";

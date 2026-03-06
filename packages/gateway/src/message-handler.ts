@@ -3,6 +3,7 @@ import { Brain, PromptBuilder, ToolExecutor } from "@babji/agent";
 import type { LlmClient } from "@babji/agent";
 import { MemoryManager, SessionStore } from "@babji/memory";
 import { CreditLedger } from "@babji/credits";
+import type { SkillRequestManager } from "@babji/skills";
 import { TenantResolver } from "./tenant-resolver.js";
 import { OnboardingHandler } from "./onboarding.js";
 
@@ -14,6 +15,7 @@ export interface MessageHandlerDeps {
   availableSkills: SkillDefinition[];
   tenantResolver: TenantResolver;
   onboarding: OnboardingHandler;
+  skillRequests: SkillRequestManager;
 }
 
 export class MessageHandler {

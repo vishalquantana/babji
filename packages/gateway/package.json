@@ -17,6 +17,7 @@
     "@babji/memory": "workspace:*",
     "@babji/credits": "workspace:*",
     "@babji/crypto": "workspace:*",
+    "@babji/skills": "workspace:*",
     "drizzle-orm": "^0.38.0",
     "grammy": "^1.30.0",
     "baileys": "^6.7.21",

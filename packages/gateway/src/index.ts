@@ -5,6 +5,7 @@ import { MemoryManager, SessionStore } from "@babji/memory";
 import { CreditLedger } from "@babji/credits";
 import { TokenVault } from "@babji/crypto";
 import { MultiModelLlmClient } from "@babji/agent";
+import { SkillRequestManager } from "@babji/skills";
 import { TenantResolver } from "./tenant-resolver.js";
 import { OnboardingHandler } from "./onboarding.js";
 import { MessageNormalizer } from "./message-normalizer.js";
@@ -38,6 +39,9 @@ async function main() {
   // Onboarding handler for new users
   const onboarding = new OnboardingHandler({ db, memory, credits });
 
+  // Skill request manager for "check with my teacher" flow
+  const skillRequests = new SkillRequestManager(db);
+
   // Create message handler (end-to-end pipeline)
   const handler = new MessageHandler({
     memory,
@@ -47,6 +51,7 @@ async function main() {
     availableSkills: [], // TODO: load from skill registry
     tenantResolver,
     onboarding,
+    skillRequests,
   });
 
   // Create and start HTTP server

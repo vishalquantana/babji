@@ -167,6 +167,9 @@ importers:
       '@babji/memory':
         specifier: workspace:*
         version: link:../memory
+      '@babji/skills':
+        specifier: workspace:*
+        version: link:../skills
       '@babji/types':
         specifier: workspace:*
         version: link:../types
@@ -233,6 +236,15 @@ importers:
       '@babji/agent':
         specifier: workspace:*
         version: link:../agent
+      '@babji/db':
+        specifier: workspace:*
+        version: link:../db
+      '@babji/types':
+        specifier: workspace:*
+        version: link:../types
+      drizzle-orm:
+        specifier: ^0.38.0
+        version: 0.38.4(@opentelemetry/api@1.9.0)(@types/react@19.2.14)(postgres@3.4.8)(react@19.2.4)
       googleapis:
         specifier: ^144.0.0
         version: 144.0.0
