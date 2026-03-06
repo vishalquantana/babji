@@ -1,0 +1,50 @@
+name: gmail
+display_name: Gmail Management
+description: Read, send, organize, and manage emails
+requires_auth:
+  provider: google
+  scopes:
+    - https://www.googleapis.com/auth/gmail.readonly
+    - https://www.googleapis.com/auth/gmail.modify
+    - https://www.googleapis.com/auth/gmail.labels
+actions:
+  - name: list_emails
+    description: List recent emails with optional search query
+    parameters:
+      query:
+        type: string
+        description: Gmail search query (e.g., "is:unread", "from:boss@company.com")
+      max_results:
+        type: number
+        default: 10
+  - name: read_email
+    description: Read the full content of a specific email
+    parameters:
+      message_id:
+        type: string
+        required: true
+  - name: send_email
+    description: Send an email
+    parameters:
+      to:
+        type: string
+        required: true
+      subject:
+        type: string
+        required: true
+      body:
+        type: string
+        required: true
+  - name: block_sender
+    description: Create a filter to block emails from a sender
+    parameters:
+      email:
+        type: string
+        required: true
+  - name: unsubscribe
+    description: Unsubscribe from a mailing list
+    parameters:
+      message_id:
+        type: string
+        required: true
+credits_per_action: 1
