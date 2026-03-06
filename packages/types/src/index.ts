@@ -6,7 +6,7 @@ export interface BabjiMessage {
   id: string;
   tenantId: string;
   channel: Channel;
-  sender: string;
+  sender: string; // phone number, telegram user id, or app user id
   text: string;
   media?: MediaAttachment;
   timestamp: Date;
@@ -52,10 +52,10 @@ export interface Tenant {
 
 export interface CreditBalance {
   tenantId: string;
-  dailyFree: number;
+  dailyFree: number; // remaining today
   prepaid: number;
-  proMonthly: number;
-  total: number;
+  proMonthly: number; // remaining this month
+  total: number; // computed
 }
 
 export type TransactionType =
@@ -69,7 +69,7 @@ export interface CreditTransaction {
   id: string;
   tenantId: string;
   type: TransactionType;
-  amount: number;
+  amount: number; // positive = credit, negative = debit
   description: string;
   timestamp: Date;
 }
@@ -121,7 +121,7 @@ export interface ServiceConnection {
   tenantId: string;
   provider: string;
   scopes: string[];
-  tokenRef: string;
+  tokenRef: string; // path to encrypted token file
   expiresAt: Date;
   createdAt: Date;
 }
@@ -130,8 +130,8 @@ export interface ServiceConnection {
 
 export interface AgentContext {
   tenant: Tenant;
-  memory: string;
-  soul: string;
+  memory: string; // contents of MEMORY.md
+  soul: string; // contents of SOUL.md
   connections: ServiceConnection[];
   skills: SkillDefinition[];
   sessionHistory: SessionMessage[];
@@ -164,10 +164,10 @@ export interface ToolResult {
 export interface HeartbeatConfig {
   tenantId: string;
   intervalMinutes: number;
-  activeHoursStart: number;
-  activeHoursEnd: number;
+  activeHoursStart: number; // 0-23
+  activeHoursEnd: number; // 0-23
   timezone: string;
-  instructions: string;
+  instructions: string; // contents of HEARTBEAT.md
 }
 
 export type HeartbeatResult = "ok" | "notification_sent";
