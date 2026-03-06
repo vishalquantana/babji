@@ -1,0 +1,43 @@
+# ---- Build Stage ----
+FROM node:22-alpine AS builder
+RUN corepack enable && corepack prepare pnpm@latest --activate
+WORKDIR /app
+
+# Copy workspace config
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
+
+# Copy all package.json files for dependency resolution
+COPY packages/types/package.json packages/types/
+COPY packages/db/package.json packages/db/
+COPY packages/agent/package.json packages/agent/
+COPY packages/memory/package.json packages/memory/
+COPY packages/credits/package.json packages/credits/
+COPY packages/crypto/package.json packages/crypto/
+COPY packages/gateway/package.json packages/gateway/
+COPY packages/skills/package.json packages/skills/
+COPY packages/heartbeat/package.json packages/heartbeat/
+COPY packages/billing/package.json packages/billing/
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile
+
+# Copy source and build
+COPY packages/ packages/
+RUN pnpm -r build
+
+# ---- Runtime Stage ----
+FROM node:22-alpine
+WORKDIR /app
+
+# Copy built artifacts and node_modules
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages ./packages
+COPY --from=builder /app/package.json ./
+
+# Create data directory for tenant files
+RUN mkdir -p /app/data/tenants
+
+ENV NODE_ENV=production
+EXPOSE 3000
+
+CMD ["node", "packages/gateway/dist/index.js"]

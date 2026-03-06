@@ -1,0 +1,37 @@
+# ---- Build Stage ----
+FROM node:22-alpine AS builder
+RUN corepack enable && corepack prepare pnpm@latest --activate
+WORKDIR /app
+
+# Copy workspace config
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+
+# Copy app package.json for dependency resolution
+COPY apps/oauth-portal/package.json apps/oauth-portal/
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile --filter @babji/oauth-portal
+
+# Copy source and build
+COPY apps/oauth-portal/ apps/oauth-portal/
+RUN cd apps/oauth-portal && pnpm build
+
+# ---- Runtime Stage ----
+FROM node:22-alpine
+WORKDIR /app
+
+# Copy Next.js build output
+COPY --from=builder /app/apps/oauth-portal/.next ./apps/oauth-portal/.next
+COPY --from=builder /app/apps/oauth-portal/package.json ./apps/oauth-portal/
+
+# Copy public assets if they exist (use a wildcard to avoid failure if missing)
+COPY --from=builder /app/apps/oauth-portal/next.config.mjs ./apps/oauth-portal/
+
+# Copy node_modules
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/apps/oauth-portal/node_modules ./apps/oauth-portal/node_modules
+
+ENV NODE_ENV=production
+EXPOSE 3100
+
+CMD ["node", "apps/oauth-portal/node_modules/.bin/next", "start", "--port", "3100"]

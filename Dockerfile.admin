@@ -1,0 +1,37 @@
+# ---- Build Stage ----
+FROM node:22-alpine AS builder
+RUN corepack enable && corepack prepare pnpm@latest --activate
+WORKDIR /app
+
+# Copy workspace config
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+
+# Copy app package.json for dependency resolution
+COPY apps/admin/package.json apps/admin/
+
+# Install dependencies
+RUN pnpm install --frozen-lockfile --filter @babji/admin
+
+# Copy source and build
+COPY apps/admin/ apps/admin/
+RUN cd apps/admin && pnpm build
+
+# ---- Runtime Stage ----
+FROM node:22-alpine
+WORKDIR /app
+
+# Copy Next.js build output
+COPY --from=builder /app/apps/admin/.next ./apps/admin/.next
+COPY --from=builder /app/apps/admin/package.json ./apps/admin/
+
+# Copy Next.js config
+COPY --from=builder /app/apps/admin/next.config.mjs ./apps/admin/
+
+# Copy node_modules
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/apps/admin/node_modules ./apps/admin/node_modules
+
+ENV NODE_ENV=production
+EXPOSE 3200
+
+CMD ["node", "apps/admin/node_modules/.bin/next", "start", "--port", "3200"]
