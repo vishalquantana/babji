@@ -1,4 +1,4 @@
-import { loadConfig } from "./config.js";
+import { loadConfig, validateConfig } from "./config.js";
 import { createServer } from "./server.js";
 import { createDb } from "@babji/db";
 import { MemoryManager, SessionStore } from "@babji/memory";
@@ -10,14 +10,11 @@ import { TenantResolver } from "./tenant-resolver.js";
 import { OnboardingHandler } from "./onboarding.js";
 import { MessageNormalizer } from "./message-normalizer.js";
 import { MessageHandler } from "./message-handler.js";
+import { logger } from "./logger.js";
 
 async function main() {
   const config = loadConfig();
-
-  // Validate critical config
-  if (!config.encryptionKey) {
-    console.warn("WARNING: ENCRYPTION_KEY not set. Token encryption will not work.");
-  }
+  validateConfig(config);
 
   // Initialize shared services
   const { db, close } = createDb(config.databaseUrl);
@@ -55,13 +52,13 @@ async function main() {
   });
 
   // Create and start HTTP server
-  const server = createServer(config);
+  const server = createServer(config, db);
   await server.listen({ port: config.port, host: "0.0.0.0" });
-  console.log(`Babji Gateway running on port ${config.port}`);
+  logger.info({ port: config.port }, "Babji Gateway running");
 
   // Graceful shutdown
   const shutdown = async () => {
-    console.log("Shutting down...");
+    logger.info("Shutting down...");
     await server.close();
     await close();
     process.exit(0);
@@ -71,6 +68,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("Gateway startup failed:", err);
+  logger.fatal({ err }, "Gateway startup failed");
   process.exit(1);
 });

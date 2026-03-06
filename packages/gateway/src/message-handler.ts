@@ -6,6 +6,8 @@ import { CreditLedger } from "@babji/credits";
 import type { SkillRequestManager } from "@babji/skills";
 import { TenantResolver } from "./tenant-resolver.js";
 import { OnboardingHandler } from "./onboarding.js";
+import { RateLimiter } from "./rate-limiter.js";
+import { logger } from "./logger.js";
 
 export interface MessageHandlerDeps {
   memory: MemoryManager;
@@ -20,14 +22,30 @@ export interface MessageHandlerDeps {
 
 export class MessageHandler {
   private brain: Brain;
+  private rateLimiter: RateLimiter;
 
   constructor(private deps: MessageHandlerDeps) {
     const toolExecutor = new ToolExecutor();
     this.brain = new Brain(deps.llm, toolExecutor);
+    this.rateLimiter = new RateLimiter();
   }
 
   async handle(message: BabjiMessage): Promise<OutboundMessage> {
     const { channel, sender } = message;
+
+    // Rate limit by sender
+    const rateLimitKey = `${channel}:${sender}`;
+    const rateCheck = this.rateLimiter.check(rateLimitKey);
+    if (!rateCheck.allowed) {
+      const retrySeconds = Math.ceil((rateCheck.retryAfterMs ?? 0) / 1000);
+      logger.warn({ sender, channel, retrySeconds }, "Rate limited");
+      return {
+        tenantId: message.tenantId || "unknown",
+        channel,
+        recipient: sender,
+        text: `You're sending messages too quickly. Please wait ${retrySeconds} seconds and try again.`,
+      };
+    }
 
     try {
       // Resolve tenant from channel-specific identifier
@@ -41,6 +59,7 @@ export class MessageHandler {
 
       // New user — run onboarding
       if (!tenant) {
+        logger.info({ sender, channel }, "New sender — routing to onboarding");
         return this.deps.onboarding.handle(message);
       }
 
@@ -91,7 +110,7 @@ export class MessageHandler {
             `Action: ${result.toolCallsMade.map((t) => t.actionName).join(", ")}`,
           );
         } else {
-          console.warn(`Tenant ${tenantId} has insufficient credits for tool call deduction`);
+          logger.warn({ tenantId }, "Insufficient credits for tool call deduction");
         }
       }
 
@@ -102,6 +121,11 @@ export class MessageHandler {
         timestamp: new Date(),
       });
 
+      logger.info(
+        { tenantId, channel, toolCalls: result.toolCallsMade.length },
+        "Message processed",
+      );
+
       return {
         tenantId,
         channel,
@@ -109,7 +133,7 @@ export class MessageHandler {
         text: result.content,
       };
     } catch (err) {
-      console.error(`Error handling message for sender ${sender}:`, err);
+      logger.error({ err, sender, channel }, "Error handling message");
       return {
         tenantId: message.tenantId || "unknown",
         channel,

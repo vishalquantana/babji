@@ -46,7 +46,17 @@ export class Brain {
     const allToolCalls: ToolCall[] = [];
 
     for (let turn = 0; turn < input.maxTurns; turn++) {
-      const response = await this.llm.chat(messages);
+      let response;
+      try {
+        response = await this.llm.chat(messages);
+      } catch (err) {
+        // LLM call failed — return a user-friendly fallback
+        return {
+          content:
+            "I'm having trouble thinking right now. Please try again in a moment.",
+          toolCallsMade: allToolCalls,
+        };
+      }
 
       if (response.toolCalls.length === 0) {
         return { content: response.content, toolCallsMade: allToolCalls };

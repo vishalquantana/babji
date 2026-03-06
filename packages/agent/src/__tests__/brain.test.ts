@@ -130,4 +130,55 @@ describe("Brain", () => {
     expect(response.toolCallsMade[0].skillName).toBe("gmail");
     expect(response.toolCallsMade[1].skillName).toBe("calendar");
   });
+
+  it("returns graceful fallback when LLM throws an error", async () => {
+    const mockLlm = {
+      chat: vi.fn().mockRejectedValue(new Error("API rate limit exceeded")),
+    };
+    const mockToolExecutor = { execute: vi.fn() };
+
+    const brain = new Brain(mockLlm, mockToolExecutor);
+    const response = await brain.process({
+      systemPrompt: "You are Babji.",
+      messages: [{ role: "user" as const, content: "Hello" }],
+      maxTurns: 5,
+    });
+
+    expect(response.content).toContain("having trouble thinking");
+    expect(response.toolCallsMade).toHaveLength(0);
+    expect(mockToolExecutor.execute).not.toHaveBeenCalled();
+  });
+
+  it("returns graceful fallback when LLM fails mid-loop after tool calls", async () => {
+    const mockLlm = {
+      chat: vi
+        .fn()
+        .mockResolvedValueOnce({
+          content: "",
+          toolCalls: [
+            { id: "tc-1", skillName: "gmail", actionName: "list_emails", parameters: {} },
+          ],
+        })
+        .mockRejectedValueOnce(new Error("Connection reset")),
+    };
+    const mockToolExecutor = {
+      execute: vi.fn().mockResolvedValue({
+        toolCallId: "tc-1",
+        success: true,
+        result: [{ subject: "Email 1" }],
+      }),
+    };
+
+    const brain = new Brain(mockLlm, mockToolExecutor);
+    const response = await brain.process({
+      systemPrompt: "You are Babji.",
+      messages: [{ role: "user" as const, content: "Check my email" }],
+      maxTurns: 5,
+    });
+
+    expect(response.content).toContain("having trouble thinking");
+    // Tool calls made before the error should still be tracked
+    expect(response.toolCallsMade).toHaveLength(1);
+    expect(response.toolCallsMade[0].skillName).toBe("gmail");
+  });
 });
