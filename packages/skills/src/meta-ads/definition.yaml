@@ -1,0 +1,44 @@
+name: meta_ads
+display_name: Meta Ads
+description: Manage Facebook and Instagram ad campaigns, view insights, and update status
+requires_auth:
+  provider: meta
+  scopes:
+    - ads_management
+    - ads_read
+actions:
+  - name: list_campaigns
+    description: List all ad campaigns in the account
+    parameters:
+      ad_account_id:
+        type: string
+        required: true
+        description: Meta ad account ID (e.g., "act_123456789")
+      max_results:
+        type: number
+        default: 20
+  - name: get_campaign_insights
+    description: Get performance insights for a campaign
+    parameters:
+      campaign_id:
+        type: string
+        required: true
+      start_date:
+        type: string
+        required: true
+        description: Start date in YYYY-MM-DD format
+      end_date:
+        type: string
+        required: true
+        description: End date in YYYY-MM-DD format
+  - name: update_campaign_status
+    description: Update the status of a campaign (ACTIVE, PAUSED, ARCHIVED)
+    parameters:
+      campaign_id:
+        type: string
+        required: true
+      status:
+        type: string
+        required: true
+        description: "New status: ACTIVE, PAUSED, or ARCHIVED"
+credits_per_action: 1
