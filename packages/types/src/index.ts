@@ -44,6 +44,7 @@ export interface Tenant {
   telegramUserId?: string;
   plan: "free" | "prepaid" | "pro";
   timezone: string;
+  containerStatus: string;
   createdAt: Date;
   lastActiveAt: Date;
 }
