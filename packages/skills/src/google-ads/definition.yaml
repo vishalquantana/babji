@@ -1,0 +1,51 @@
+name: google_ads
+display_name: Google Ads
+description: Manage Google Ads campaigns, view reports, and update budgets
+requires_auth:
+  provider: google
+  scopes:
+    - https://www.googleapis.com/auth/adwords
+actions:
+  - name: list_campaigns
+    description: List all campaigns in the account
+    parameters:
+      customer_id:
+        type: string
+        required: true
+        description: Google Ads customer ID (without dashes)
+      max_results:
+        type: number
+        default: 20
+  - name: get_campaign_report
+    description: Get performance report for a campaign
+    parameters:
+      customer_id:
+        type: string
+        required: true
+        description: Google Ads customer ID (without dashes)
+      campaign_id:
+        type: string
+        required: true
+      start_date:
+        type: string
+        required: true
+        description: Start date in YYYY-MM-DD format
+      end_date:
+        type: string
+        required: true
+        description: End date in YYYY-MM-DD format
+  - name: update_budget
+    description: Update the daily budget for a campaign
+    parameters:
+      customer_id:
+        type: string
+        required: true
+        description: Google Ads customer ID (without dashes)
+      campaign_id:
+        type: string
+        required: true
+      budget_amount_micros:
+        type: number
+        required: true
+        description: New daily budget in micros (e.g., 5000000 = $5.00)
+credits_per_action: 1
