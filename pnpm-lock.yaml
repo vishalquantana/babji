@@ -114,9 +114,21 @@ importers:
 
   packages/gateway:
     dependencies:
+      '@babji/agent':
+        specifier: workspace:*
+        version: link:../agent
+      '@babji/credits':
+        specifier: workspace:*
+        version: link:../credits
+      '@babji/crypto':
+        specifier: workspace:*
+        version: link:../crypto
       '@babji/db':
         specifier: workspace:*
         version: link:../db
+      '@babji/memory':
+        specifier: workspace:*
+        version: link:../memory
       '@babji/types':
         specifier: workspace:*
         version: link:../types

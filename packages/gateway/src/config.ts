@@ -2,6 +2,8 @@ export interface GatewayConfig {
   port: number;
   databaseUrl: string;
   redisUrl: string;
+  memoryBaseDir: string;
+  encryptionKey: string;
   whatsapp: {
     enabled: boolean;
   };
@@ -18,6 +20,8 @@ export function loadConfig(): GatewayConfig {
       process.env.DATABASE_URL ||
       "postgres://babji:babji_dev@localhost:5432/babji",
     redisUrl: process.env.REDIS_URL || "redis://localhost:6379",
+    memoryBaseDir: process.env.MEMORY_BASE_DIR || "./data/tenants",
+    encryptionKey: process.env.ENCRYPTION_KEY || "",
     whatsapp: {
       enabled: process.env.WHATSAPP_ENABLED !== "false",
     },
