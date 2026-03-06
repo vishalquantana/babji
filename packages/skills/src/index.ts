@@ -1,1 +1,9 @@
 export { GmailHandler } from "./gmail/index.js";
+export { GoogleCalendarHandler } from "./google-calendar/index.js";
+export { GoogleContactsHandler } from "./google-contacts/index.js";
+export { GoogleAdsHandler } from "./google-ads/index.js";
+export { MetaAdsHandler } from "./meta-ads/index.js";
+export { InstagramHandler } from "./instagram/index.js";
+export { FacebookPagesHandler } from "./facebook-pages/index.js";
+export { LinkedInHandler } from "./linkedin/index.js";
+export { XHandler } from "./x/index.js";
