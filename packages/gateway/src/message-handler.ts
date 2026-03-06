@@ -3,6 +3,8 @@ import { Brain, PromptBuilder, ToolExecutor } from "@babji/agent";
 import type { LlmClient } from "@babji/agent";
 import { MemoryManager, SessionStore } from "@babji/memory";
 import { CreditLedger } from "@babji/credits";
+import { TenantResolver } from "./tenant-resolver.js";
+import { OnboardingHandler } from "./onboarding.js";
 
 export interface MessageHandlerDeps {
   memory: MemoryManager;
@@ -10,6 +12,8 @@ export interface MessageHandlerDeps {
   credits: CreditLedger;
   llm: LlmClient;
   availableSkills: SkillDefinition[];
+  tenantResolver: TenantResolver;
+  onboarding: OnboardingHandler;
 }
 
 export class MessageHandler {
@@ -21,16 +25,32 @@ export class MessageHandler {
   }
 
   async handle(message: BabjiMessage): Promise<OutboundMessage> {
-    const { tenantId, channel, sender, text } = message;
+    const { channel, sender } = message;
 
     try {
+      // Resolve tenant from channel-specific identifier
+      let tenant = channel === "whatsapp"
+        ? await this.deps.tenantResolver.resolveByPhone(sender)
+        : null;
+
+      if (!tenant && channel === "telegram") {
+        tenant = await this.deps.tenantResolver.resolveByTelegramId(sender);
+      }
+
+      // New user — run onboarding
+      if (!tenant) {
+        return this.deps.onboarding.handle(message);
+      }
+
+      const tenantId = tenant.id;
+
       // Build a unique session identifier per channel + sender
       const sessionId = `${channel}-${sender}`;
 
       // Store incoming message in session history
       await this.deps.sessions.append(tenantId, sessionId, {
         role: "user",
-        content: text,
+        content: message.text,
         timestamp: new Date(),
       });
 
@@ -87,9 +107,9 @@ export class MessageHandler {
         text: result.content,
       };
     } catch (err) {
-      console.error(`Error handling message for tenant ${tenantId}:`, err);
+      console.error(`Error handling message for sender ${sender}:`, err);
       return {
-        tenantId,
+        tenantId: message.tenantId || "unknown",
         channel,
         recipient: sender,
         text: "Oops! Something went wrong on my end. Please try again in a moment.",
