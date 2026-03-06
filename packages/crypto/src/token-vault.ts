@@ -34,6 +34,7 @@ export class TokenVault {
   }
 
   async store(tenantId: string, provider: string, data: unknown): Promise<void> {
+    const path = this.filePath(tenantId, provider);
     const dir = join(this.baseDir, tenantId, "credentials");
     await mkdir(dir, { recursive: true });
 
@@ -47,7 +48,7 @@ export class TokenVault {
 
     // Format: iv (16 bytes) + tag (16 bytes) + encrypted data
     const combined = Buffer.concat([iv, tag, encrypted]);
-    await writeFile(this.filePath(tenantId, provider), combined);
+    await writeFile(path, combined);
   }
 
   async retrieve(tenantId: string, provider: string): Promise<unknown | null> {
