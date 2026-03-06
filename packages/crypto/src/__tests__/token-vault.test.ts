@@ -42,4 +42,39 @@ describe("TokenVault", () => {
     const result = await vault.retrieve("tenant-1", "gmail");
     expect(result).toBeNull();
   });
+
+  it("throws on retrieve with wrong key instead of returning null", async () => {
+    const vault1 = new TokenVault(tempDir, encryptionKey);
+    await vault1.store("tenant-1", "gmail", { accessToken: "secret" });
+
+    const wrongKey = "abcdef0123456789abcdef0123456789";
+    const vault2 = new TokenVault(tempDir, wrongKey);
+    await expect(vault2.retrieve("tenant-1", "gmail")).rejects.toThrow();
+  });
+
+  it("rejects tenantId with path traversal characters", async () => {
+    const vault = new TokenVault(tempDir, encryptionKey);
+    await expect(
+      vault.store("../../etc", "gmail", { accessToken: "test" })
+    ).rejects.toThrow(/Invalid tenantId/);
+    await expect(
+      vault.retrieve("../other-tenant", "gmail")
+    ).rejects.toThrow(/Invalid tenantId/);
+    await expect(
+      vault.delete("../other-tenant", "gmail")
+    ).rejects.toThrow(/Invalid tenantId/);
+  });
+
+  it("rejects provider with path traversal characters", async () => {
+    const vault = new TokenVault(tempDir, encryptionKey);
+    await expect(
+      vault.store("tenant-1", "../evil", { accessToken: "test" })
+    ).rejects.toThrow(/Invalid provider/);
+    await expect(
+      vault.retrieve("tenant-1", "../../etc/passwd")
+    ).rejects.toThrow(/Invalid provider/);
+    await expect(
+      vault.delete("tenant-1", "../evil")
+    ).rejects.toThrow(/Invalid provider/);
+  });
 });

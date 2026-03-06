@@ -6,6 +6,16 @@ const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 16;
 const TAG_LENGTH = 16;
 
+const SAFE_NAME_RE = /^[a-zA-Z0-9_-]+$/;
+
+function assertSafeName(value: string, label: string): void {
+  if (!SAFE_NAME_RE.test(value)) {
+    throw new Error(
+      `Invalid ${label}: must contain only alphanumeric characters, hyphens, or underscores`
+    );
+  }
+}
+
 export class TokenVault {
   private key: Buffer;
 
@@ -18,6 +28,8 @@ export class TokenVault {
   }
 
   private filePath(tenantId: string, provider: string): string {
+    assertSafeName(tenantId, "tenantId");
+    assertSafeName(provider, "provider");
     return join(this.baseDir, tenantId, "credentials", `${provider}.enc`);
   }
 
@@ -52,16 +64,22 @@ export class TokenVault {
       decrypted = Buffer.concat([decrypted, decipher.final()]);
 
       return JSON.parse(decrypted.toString("utf8"));
-    } catch {
-      return null;
+    } catch (err: unknown) {
+      if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+        return null;
+      }
+      throw err;
     }
   }
 
   async delete(tenantId: string, provider: string): Promise<void> {
     try {
       await unlink(this.filePath(tenantId, provider));
-    } catch {
-      // Ignore if file doesn't exist
+    } catch (err: unknown) {
+      if (err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT") {
+        return;
+      }
+      throw err;
     }
   }
 }
