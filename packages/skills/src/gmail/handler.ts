@@ -24,6 +24,8 @@ export class GmailHandler implements SkillHandler {
         );
       case "block_sender":
         return this.blockSender(params.email as string);
+      case "unsubscribe":
+        return this.unsubscribe(params.message_id as string);
       default:
         throw new Error(`Unknown Gmail action: ${actionName}`);
     }
@@ -102,6 +104,35 @@ export class GmailHandler implements SkillHandler {
     });
 
     return { blocked: true, email };
+  }
+
+  private async unsubscribe(messageId: string) {
+    const res = await this.gmail.users.messages.get({
+      userId: "me",
+      id: messageId,
+      format: "metadata",
+      metadataHeaders: ["List-Unsubscribe"],
+    });
+
+    const headers = res.data.payload?.headers || [];
+    const unsubHeader = headers.find((h) => h.name === "List-Unsubscribe")?.value;
+
+    if (!unsubHeader) {
+      return { unsubscribed: false, reason: "No List-Unsubscribe header found in this email" };
+    }
+
+    // Extract URL from header (format: <https://...> or <mailto:...>)
+    const urlMatch = unsubHeader.match(/<(https?:\/\/[^>]+)>/);
+    if (urlMatch) {
+      return { unsubscribed: true, method: "url", url: urlMatch[1] };
+    }
+
+    const mailtoMatch = unsubHeader.match(/<mailto:([^>]+)>/);
+    if (mailtoMatch) {
+      return { unsubscribed: true, method: "mailto", email: mailtoMatch[1] };
+    }
+
+    return { unsubscribed: false, reason: "Could not parse List-Unsubscribe header" };
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
