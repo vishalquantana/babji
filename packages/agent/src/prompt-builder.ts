@@ -5,6 +5,7 @@ interface PromptContext {
   memory: string;
   skills: SkillDefinition[];
   connections: string[];
+  userName?: string;
 }
 
 export class PromptBuilder {
@@ -13,6 +14,12 @@ export class PromptBuilder {
 
     parts.push(ctx.soul);
     parts.push("");
+    if (ctx.userName) {
+      parts.push(`## Client identity`);
+      parts.push(`You are working for: **${ctx.userName}**`);
+      parts.push(`When sending emails, always sign as "${ctx.userName}" — never use placeholders like [Your Name] or [Client Name].`);
+      parts.push("");
+    }
     parts.push("## What you remember about this client");
     parts.push(ctx.memory || "Nothing yet -- this is a new client.");
     parts.push("");
@@ -24,8 +31,17 @@ export class PromptBuilder {
     }
     parts.push("");
     parts.push("## Available skills");
-    for (const skill of ctx.skills) {
-      if (!ctx.connections.includes(skill.name) && skill.requiresAuth) continue;
+    const connectedSkills = ctx.skills.filter(
+      (s) => !s.requiresAuth || ctx.connections.includes(s.name)
+    );
+    const disconnectedSkills = ctx.skills.filter(
+      (s) => s.requiresAuth && !ctx.connections.includes(s.name)
+    );
+
+    if (connectedSkills.length === 0) {
+      parts.push("No skills available yet. The client needs to connect a service first.");
+    }
+    for (const skill of connectedSkills) {
       parts.push(`### ${skill.displayName} (${skill.name})`);
       parts.push(skill.description);
       for (const action of skill.actions) {
@@ -33,6 +49,15 @@ export class PromptBuilder {
           .map(([k, v]) => `${k}: ${v.type}${v.required ? " (required)" : ""}`)
           .join(", ");
         parts.push(`- ${action.name}(${params}): ${action.description}`);
+      }
+    }
+
+    if (disconnectedSkills.length > 0) {
+      parts.push("");
+      parts.push("## Services available to connect (NOT yet connected)");
+      parts.push("These services are NOT connected. You CANNOT use them. If the user asks about any of these, tell them they need to connect first by typing the connect command shown below. NEVER make up a URL — just tell them what to type.");
+      for (const skill of disconnectedSkills) {
+        parts.push(`- ${skill.displayName}: ${skill.description} → tell user to type: "connect ${skill.name}"`);
       }
     }
 

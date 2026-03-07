@@ -35,6 +35,13 @@ actions:
       body:
         type: string
         required: true
+  - name: archive_emails
+    description: Archive emails by removing them from the inbox
+    parameters:
+      message_ids:
+        type: array
+        description: List of message IDs to archive
+        required: true
   - name: block_sender
     description: Create a filter to block emails from a sender
     parameters:

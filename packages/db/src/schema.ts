@@ -104,6 +104,12 @@ export const skillRequests = pgTable(
   ]
 );
 
+export const shortLinks = pgTable("short_links", {
+  id: varchar("id", { length: 12 }).primaryKey(),
+  url: text("url").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const auditLog = pgTable(
   "audit_log",
   {

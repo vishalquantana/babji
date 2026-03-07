@@ -55,6 +55,19 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
       create: vi.fn(),
       list: vi.fn(),
     },
+    db: {
+      query: {
+        serviceConnections: {
+          findMany: vi.fn().mockResolvedValue([]),
+        },
+      },
+    },
+    vault: {
+      retrieve: vi.fn().mockResolvedValue(null),
+      store: vi.fn().mockResolvedValue(undefined),
+    },
+    oauthPortalUrl: "https://auth.babji.ai",
+    googleClientId: "test-client-id",
     ...overrides,
   };
 }

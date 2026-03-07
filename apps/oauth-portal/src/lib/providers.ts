@@ -18,12 +18,15 @@ export const providers: Record<string, ProviderConfig> = {
     authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
     tokenUrl: "https://oauth2.googleapis.com/token",
   },
-  calendar: {
+  google_calendar: {
     displayName: "Google Calendar",
     description: "View and manage your calendar events",
     clientIdEnv: "GOOGLE_CLIENT_ID",
     clientSecretEnv: "GOOGLE_CLIENT_SECRET",
-    scopes: ["https://www.googleapis.com/auth/calendar"],
+    scopes: [
+      "https://www.googleapis.com/auth/calendar",
+      "https://www.googleapis.com/auth/calendar.events",
+    ],
     authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
     tokenUrl: "https://oauth2.googleapis.com/token",
   },

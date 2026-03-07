@@ -13,7 +13,7 @@ interface LlmResponse {
 }
 
 export interface LlmClient {
-  chat(messages: ChatMessage[]): Promise<LlmResponse>;
+  chat(messages: ChatMessage[], tools?: Record<string, unknown>): Promise<LlmResponse>;
 }
 
 export interface ToolExecutor {
@@ -24,6 +24,7 @@ interface ProcessInput {
   systemPrompt: string;
   messages: { role: "user" | "assistant"; content: string }[];
   maxTurns: number;
+  tools?: Record<string, unknown>;
 }
 
 interface ProcessOutput {
@@ -46,11 +47,15 @@ export class Brain {
     const allToolCalls: ToolCall[] = [];
 
     for (let turn = 0; turn < input.maxTurns; turn++) {
+      // On the last turn, don't offer tools so the LLM must produce a text response
+      const isLastTurn = turn === input.maxTurns - 1;
+      const toolsForTurn = isLastTurn ? undefined : input.tools;
+
       let response;
       try {
-        response = await this.llm.chat(messages);
+        response = await this.llm.chat(messages, toolsForTurn);
       } catch (err) {
-        // LLM call failed — return a user-friendly fallback
+        console.error(`[Brain] LLM call failed on turn ${turn}:`, err);
         return {
           content:
             "I'm having trouble thinking right now. Please try again in a moment.",
@@ -58,25 +63,38 @@ export class Brain {
         };
       }
 
+      console.log(`[Brain] Turn ${turn}: text=${(response.content ?? "").length}chars, toolCalls=${response.toolCalls.length}`);
+
       if (response.toolCalls.length === 0) {
         return { content: response.content, toolCallsMade: allToolCalls };
       }
 
-      messages.push({
-        role: "assistant",
-        content: response.content || "",
-        toolCalls: response.toolCalls,
-      });
-
+      // Execute tool calls and collect results
+      const resultSummaries: string[] = [];
       for (const toolCall of response.toolCalls) {
+        console.log(`[Brain] Tool call: ${toolCall.skillName}.${toolCall.actionName}`, JSON.stringify(toolCall.parameters));
         allToolCalls.push(toolCall);
         const result = await this.toolExecutor.execute(toolCall);
-        messages.push({
-          role: "tool",
-          content: JSON.stringify(result.result),
-          toolCallId: toolCall.id,
-        });
+        console.log(`[Brain] Tool result: success=${result.success}${result.error ? ` error=${result.error}` : ""} resultSize=${JSON.stringify(result.result ?? null).length}`);
+        // Truncate large results to avoid blowing up context
+        const resultJson = JSON.stringify(result.result ?? null, null, 2);
+        const truncated = resultJson.length > 4000
+          ? resultJson.slice(0, 4000) + "\n...(truncated)"
+          : resultJson;
+        resultSummaries.push(
+          `[${toolCall.skillName}.${toolCall.actionName}] Result:\n${truncated}`
+        );
       }
+
+      // Feed tool results back as a user message so we avoid complex
+      // multi-part assistant/tool message formatting for the AI SDK
+      if (response.content) {
+        messages.push({ role: "assistant", content: response.content });
+      }
+      messages.push({
+        role: "user",
+        content: `Here are the results of the actions you requested:\n\n${resultSummaries.join("\n\n")}\n\nBased on these results, write your final response to the user. Do NOT call any more tools — just summarize what you found.`,
+      });
     }
 
     return {

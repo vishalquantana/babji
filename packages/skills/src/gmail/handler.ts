@@ -26,6 +26,9 @@ export class GmailHandler implements SkillHandler {
           params.subject as string,
           params.body as string
         );
+      case "archive_emails":
+        this.requireParam(params, "message_ids", actionName);
+        return this.archiveEmails(params.message_ids as string[]);
       case "block_sender":
         this.requireParam(params, "email", actionName);
         return this.blockSender(params.email as string);
@@ -135,6 +138,24 @@ export class GmailHandler implements SkillHandler {
       return { sent: true, messageId: res.data.id };
     } catch (err) {
       this.wrapApiError("send_email", err);
+    }
+  }
+
+  private async archiveEmails(messageIds: string[]) {
+    try {
+      const results = await Promise.all(
+        messageIds.map(async (id) => {
+          await this.gmail.users.messages.modify({
+            userId: "me",
+            id,
+            requestBody: { removeLabelIds: ["INBOX"] },
+          });
+          return id;
+        })
+      );
+      return { archived: true, count: results.length, messageIds: results };
+    } catch (err) {
+      this.wrapApiError("archive_emails", err);
     }
   }
 

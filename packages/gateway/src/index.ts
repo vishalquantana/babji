@@ -5,7 +5,7 @@ import { MemoryManager, SessionStore } from "@babji/memory";
 import { CreditLedger } from "@babji/credits";
 import { TokenVault } from "@babji/crypto";
 import { MultiModelLlmClient } from "@babji/agent";
-import { SkillRequestManager } from "@babji/skills";
+import { SkillRequestManager, loadSkillDefinitions } from "@babji/skills";
 import { TenantResolver } from "./tenant-resolver.js";
 import { OnboardingHandler } from "./onboarding.js";
 import { MessageHandler } from "./message-handler.js";
@@ -33,6 +33,14 @@ async function main() {
     googleApiKey: config.googleApiKey,
   });
 
+  // Lightweight LLM for background tasks (memory extraction, summaries)
+  const llmLite = new MultiModelLlmClient({
+    primaryProvider: "google",
+    fallbackProviders: [],
+    googleApiKey: config.googleApiKey,
+    googleModelOverride: process.env.GOOGLE_LITE_MODEL || "gemini-2.0-flash-lite",
+  });
+
   const tenantResolver = new TenantResolver(db);
 
   // Onboarding handler for new users
@@ -41,16 +49,25 @@ async function main() {
   // Skill request manager for "check with my teacher" flow
   const skillRequests = new SkillRequestManager(db);
 
+  // Load skill definitions
+  const availableSkills = loadSkillDefinitions();
+  logger.info({ skills: availableSkills.map((s) => s.name) }, "Loaded skill definitions");
+
   // Create message handler (end-to-end pipeline)
   const handler = new MessageHandler({
     memory,
     sessions,
     credits,
     llm,
-    availableSkills: [], // TODO: load from skill registry
+    llmLite,
+    availableSkills,
     tenantResolver,
     onboarding,
     skillRequests,
+    db,
+    vault,
+    oauthPortalUrl: process.env.OAUTH_PORTAL_URL || "https://auth.babji.ai",
+    googleClientId: process.env.GOOGLE_CLIENT_ID || "",
   });
 
   // Start channel adapters
@@ -81,7 +98,7 @@ async function main() {
   }
 
   // Create and start HTTP server
-  const server = createServer(config, db);
+  const server = createServer({ config, db, handler, adapters });
   await server.listen({ port: config.port, host: "0.0.0.0" });
   logger.info({ port: config.port, channels: adapters.map((a) => a.name) }, "Babji Gateway running");
 

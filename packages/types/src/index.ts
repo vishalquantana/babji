@@ -96,10 +96,12 @@ export interface SkillAction {
 }
 
 export interface SkillParameter {
-  type: "string" | "number" | "boolean";
+  type: "string" | "number" | "boolean" | "array";
   required?: boolean;
   default?: unknown;
   description?: string;
+  /** For array type: the type of items in the array */
+  items?: { type: "string" | "number" | "boolean" };
 }
 
 export type SkillRequestStatus = "pending" | "in_progress" | "completed" | "rejected";
