@@ -31,6 +31,11 @@ export class OnboardingHandler {
 
     const trimmed = text.trim();
 
+    // Treat Telegram /commands (e.g. /start) as a greeting, not a name
+    if (trimmed.startsWith("/")) {
+      return this.reply(message, this.welcomeMessage());
+    }
+
     // Simple heuristic: treat as a name if 2-50 chars and contains at least one letter
     if (this.looksLikeName(trimmed)) {
       const tenantId = randomUUID();
@@ -61,7 +66,21 @@ export class OnboardingHandler {
   }
 
   private looksLikeName(value: string): boolean {
-    return value.length >= 2 && value.length <= 50 && /[a-zA-Z]/.test(value);
+    if (value.length < 2 || value.length > 50 || !/[a-zA-Z]/.test(value)) {
+      return false;
+    }
+
+    // Common greetings and phrases that aren't names
+    const notNames = new Set([
+      "hello", "hi", "hey", "hiya", "howdy", "sup",
+      "yo", "hola", "help", "start", "begin",
+      "yes", "no", "ok", "okay", "sure", "thanks",
+      "thank you", "good morning", "good evening",
+      "good afternoon", "good night", "what", "who",
+      "how", "why", "test", "testing",
+    ]);
+
+    return !notNames.has(value.toLowerCase());
   }
 
   private welcomeMessage(): string {

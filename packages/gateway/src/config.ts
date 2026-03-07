@@ -29,7 +29,7 @@ export function loadConfig(): GatewayConfig {
     openaiApiKey: process.env.OPENAI_API_KEY || "",
     googleApiKey: process.env.GOOGLE_API_KEY || "",
     whatsapp: {
-      enabled: process.env.WHATSAPP_ENABLED !== "false",
+      enabled: process.env.WHATSAPP_ENABLED === "true",
     },
     telegram: {
       enabled: !!process.env.TELEGRAM_BOT_TOKEN,

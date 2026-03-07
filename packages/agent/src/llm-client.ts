@@ -45,13 +45,26 @@ export class MultiModelLlmClient {
       }
       case "google": {
         const google = createGoogleGenerativeAI({ apiKey: this.config.googleApiKey });
-        return google("gemini-2.0-flash");
+        return google("gemini-3-flash-preview");
       }
     }
   }
 
+  private hasKey(provider: Provider): boolean {
+    switch (provider) {
+      case "anthropic": return !!this.config.anthropicApiKey;
+      case "openai": return !!this.config.openaiApiKey;
+      case "google": return !!this.config.googleApiKey;
+    }
+  }
+
   async chat(messages: ChatMessage[]): Promise<LlmResponse> {
-    const providers = [this.config.primaryProvider, ...this.config.fallbackProviders];
+    const providers = [this.config.primaryProvider, ...this.config.fallbackProviders]
+      .filter((p) => this.hasKey(p));
+
+    if (providers.length === 0) {
+      throw new Error("No LLM providers configured with API keys");
+    }
 
     for (const provider of providers) {
       try {

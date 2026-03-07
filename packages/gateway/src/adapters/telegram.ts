@@ -3,6 +3,7 @@ import type { ChannelAdapter } from "./types.js";
 import type { BabjiMessage, OutboundMessage } from "@babji/types";
 import { MessageNormalizer } from "../message-normalizer.js";
 import { TenantResolver } from "../tenant-resolver.js";
+import { logger } from "../logger.js";
 
 export class TelegramAdapter implements ChannelAdapter {
   name = "telegram";
@@ -21,32 +22,56 @@ export class TelegramAdapter implements ChannelAdapter {
   }
 
   async start(): Promise<void> {
+    // Global error handler for grammy
+    this.bot.catch((err) => {
+      logger.error({ err: err.error, ctx: err.ctx?.update?.update_id }, "Telegram bot error");
+    });
+
+    // Handle text messages
     this.bot.on("message:text", async (ctx) => {
       const telegramUserId = String(ctx.from.id);
-      let tenant = await this.tenantResolver.resolveByTelegramId(telegramUserId);
-      const tenantId = tenant?.id || "onboarding:tg:" + telegramUserId;
 
-      const normalized = MessageNormalizer.fromTelegram(
-        {
-          message_id: ctx.message.message_id,
-          from: ctx.from,
-          text: ctx.message.text,
-          date: ctx.message.date,
-        },
-        tenantId
-      );
+      try {
+        const tenant = await this.tenantResolver.resolveByTelegramId(telegramUserId);
+        const tenantId = tenant?.id || "onboarding:tg:" + telegramUserId;
 
-      if (this.messageHandler) {
-        await this.messageHandler(normalized);
+        const normalized = MessageNormalizer.fromTelegram(
+          {
+            message_id: ctx.message.message_id,
+            from: ctx.from,
+            text: ctx.message.text,
+            date: ctx.message.date,
+          },
+          tenantId
+        );
+
+        if (this.messageHandler) {
+          await this.messageHandler(normalized);
+        }
+      } catch (err) {
+        logger.error({ err, telegramUserId }, "Error processing Telegram message");
+      }
+    });
+
+    // Reply to non-text messages (photos, stickers, voice, etc.)
+    this.bot.on("message", async (ctx) => {
+      // Skip text messages — handled above
+      if (ctx.message.text) return;
+
+      try {
+        await ctx.reply("I can only read text messages for now. Send me a text and I'll get right on it!");
+      } catch (err) {
+        logger.error({ err }, "Error sending non-text reply");
       }
     });
 
     this.bot.start();
-    console.log("Telegram bot started.");
+    logger.info("Telegram bot started (long polling)");
   }
 
   async stop(): Promise<void> {
     await this.bot.stop();
+    logger.info("Telegram bot stopped");
   }
 
   async sendMessage(message: OutboundMessage): Promise<void> {
