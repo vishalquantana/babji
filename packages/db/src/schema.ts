@@ -33,6 +33,8 @@ export const tenants = pgTable(
     onboardingPhase: varchar("onboarding_phase", { length: 20 })
       .notNull()
       .default("name"),
+    emailDomain: varchar("email_domain", { length: 100 }),
+    meetingBriefingPref: varchar("meeting_briefing_pref", { length: 20 }),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     lastActiveAt: timestamp("last_active_at").notNull().defaultNow(),
   },

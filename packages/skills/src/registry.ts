@@ -800,6 +800,33 @@ const checkWithTeacherSkill: SkillDefinition = {
         },
       },
     },
+    {
+      name: "enable_meeting_briefings",
+      description: "Enable automatic pre-meeting attendee research briefings. Babji will research external attendees before calendar meetings and send a dossier. Each person researched uses 1 daily use.",
+      parameters: {
+        timing: {
+          type: "string",
+          required: true,
+          description: "When to deliver briefings: 'morning' (with daily calendar summary) or 'pre_meeting' (1 hour before each meeting)",
+        },
+      },
+    },
+    {
+      name: "disable_meeting_briefings",
+      description: "Turn off automatic meeting attendee briefings.",
+      parameters: {},
+    },
+    {
+      name: "research_meeting_attendees",
+      description: "Research attendees of a specific upcoming meeting right now. Returns a dossier on each external attendee (non-teammate).",
+      parameters: {
+        meeting_query: {
+          type: "string",
+          required: true,
+          description: "Which meeting to research, e.g. '2 PM meeting', 'meeting with Acme', 'next meeting'",
+        },
+      },
+    },
   ],
   creditsPerAction: 0,
 };
