@@ -127,7 +127,15 @@ async function main() {
   }
 
   // Start the scheduled job runner
-  const jobRunner = new JobRunner({ db, vault, adapters });
+  const jobRunner = new JobRunner({
+    db,
+    vault,
+    adapters,
+    googleApiKey: config.googleApiKey,
+    llm,
+    memory,
+    availableSkills,
+  });
   jobRunner.start();
 
   // Create and start HTTP server

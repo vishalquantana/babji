@@ -3,6 +3,10 @@ import type { Database } from "@babji/db";
 import { schema } from "@babji/db";
 import { TokenVault } from "@babji/crypto";
 import { GoogleCalendarHandler } from "@babji/skills";
+import type { LlmClient } from "@babji/agent";
+import { Brain, PromptBuilder, ToolExecutor } from "@babji/agent";
+import { MemoryManager } from "@babji/memory";
+import type { SkillDefinition } from "@babji/types";
 import type { ChannelAdapter } from "./adapters/types.js";
 import { ensureValidToken } from "./token-refresh.js";
 import { logger } from "./logger.js";
@@ -94,6 +98,10 @@ export interface JobRunnerDeps {
   db: Database;
   vault: TokenVault;
   adapters: ChannelAdapter[];
+  googleApiKey: string;
+  llm: LlmClient;
+  memory: MemoryManager;
+  availableSkills: SkillDefinition[];
 }
 
 export class JobRunner {
@@ -155,6 +163,12 @@ export class JobRunner {
         break;
       case "reminder":
         await this.runReminder(job);
+        break;
+      case "todo_reminder":
+        await this.runTodoReminder(job);
+        break;
+      case "deep_research":
+        await this.runDeepResearch(job);
         break;
       default:
         logger.warn({ jobType: job.jobType }, "Unknown job type, skipping");
@@ -289,6 +303,244 @@ export class JobRunner {
     await this.deps.db.update(schema.scheduledJobs)
       .set({ status: "completed", lastRunAt: new Date() })
       .where(eq(schema.scheduledJobs.id, job.id));
+  }
+
+  private async runTodoReminder(job: typeof schema.scheduledJobs.$inferSelect): Promise<void> {
+    const tenantId = job.tenantId;
+    const payload = job.payload as { todoId?: string; title?: string } | null;
+
+    if (!payload?.todoId) {
+      logger.warn({ jobId: job.id }, "todo_reminder job missing todoId in payload");
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "failed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      return;
+    }
+
+    // Check if todo is still pending
+    const todo = await this.deps.db.query.todos.findFirst({
+      where: and(eq(schema.todos.id, payload.todoId), eq(schema.todos.tenantId, tenantId)),
+    });
+
+    if (!todo || todo.status === "done") {
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "completed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      return;
+    }
+
+    const tenant = await this.deps.db.query.tenants.findFirst({
+      where: eq(schema.tenants.id, tenantId),
+    });
+    if (!tenant) return;
+
+    const recipient = tenant.telegramUserId || tenant.phone;
+    const channel = (tenant.telegramUserId ? "telegram" : "whatsapp") as "telegram" | "whatsapp" | "app";
+    if (!recipient) return;
+
+    const adapter = this.deps.adapters.find((a) => a.name === channel);
+    if (!adapter) return;
+
+    // Format a friendly reminder
+    const title = todo.title;
+    let message = `Hey ${tenant.name}, just a heads up -- "${title}"`;
+    if (todo.dueDate) {
+      const formattedDate = new Date(todo.dueDate + "T00:00:00").toLocaleDateString("en-US", {
+        timeZone: tenant.timezone || "UTC",
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      });
+      message += ` is coming up on ${formattedDate}`;
+    }
+    message += `. Want to mark it done, push it back, or need help with it?`;
+
+    await adapter.sendMessage({ tenantId, channel, recipient, text: message });
+
+    logger.info({ tenantId, todoId: payload.todoId, title }, "Sent todo reminder");
+
+    // Mark job as completed (one-time)
+    await this.deps.db.update(schema.scheduledJobs)
+      .set({ status: "completed", lastRunAt: new Date() })
+      .where(eq(schema.scheduledJobs.id, job.id));
+  }
+
+  private async runDeepResearch(job: typeof schema.scheduledJobs.$inferSelect): Promise<void> {
+    const payload = job.payload as {
+      interactionId?: string;
+      query?: string;
+      tenantId?: string;
+      channel?: string;
+      startedAt?: string;
+    } | null;
+
+    if (!payload?.interactionId || !payload?.tenantId) {
+      logger.warn({ jobId: job.id }, "deep_research job missing interactionId or tenantId");
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "failed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      return;
+    }
+
+    // Check timeout: if started more than 60 minutes ago, fail
+    const startedAt = payload.startedAt ? new Date(payload.startedAt) : job.createdAt;
+    const elapsedMs = Date.now() - startedAt.getTime();
+    if (elapsedMs > 60 * 60 * 1000) {
+      logger.warn({ jobId: job.id, elapsedMs }, "deep_research timed out after 60 minutes");
+      await this.sendDeepResearchError(payload.tenantId, payload.channel, payload.query || "your topic");
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "failed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      return;
+    }
+
+    // Poll the Interactions API
+    const url = `https://generativelanguage.googleapis.com/v1beta/interactions/${payload.interactionId}`;
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers: { "x-goog-api-key": this.deps.googleApiKey },
+      });
+    } catch (err) {
+      logger.error({ err, jobId: job.id }, "Failed to poll deep research interaction");
+      // Don't fail the job — retry on next tick
+      return;
+    }
+
+    if (!res.ok) {
+      const body = await res.text();
+      logger.error({ status: res.status, body, jobId: job.id }, "Deep research poll returned error");
+      if (res.status === 404) {
+        await this.sendDeepResearchError(payload.tenantId, payload.channel, payload.query || "your topic");
+        await this.deps.db.update(schema.scheduledJobs)
+          .set({ status: "failed", lastRunAt: new Date() })
+          .where(eq(schema.scheduledJobs.id, job.id));
+      }
+      return;
+    }
+
+    const data = await res.json() as {
+      status?: string;
+      outputs?: Array<{ text?: string }>;
+    };
+
+    if (data.status === "in_progress") {
+      logger.debug({ jobId: job.id, interactionId: payload.interactionId }, "Deep research still in progress");
+      return;
+    }
+
+    if (data.status === "failed") {
+      logger.warn({ jobId: job.id }, "Deep research interaction failed");
+      await this.sendDeepResearchError(payload.tenantId, payload.channel, payload.query || "your topic");
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "failed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      return;
+    }
+
+    if (data.status === "completed") {
+      const report = data.outputs?.at(-1)?.text || "(No report content returned)";
+      await this.deliverDeepResearchReport(payload.tenantId, payload.channel, payload.query || "your topic", report);
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "completed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      logger.info({ jobId: job.id, tenantId: payload.tenantId, query: payload.query }, "Deep research completed and delivered");
+    }
+  }
+
+  private async deliverDeepResearchReport(
+    tenantId: string,
+    channel: string | undefined,
+    query: string,
+    report: string,
+  ): Promise<void> {
+    const tenant = await this.deps.db.query.tenants.findFirst({
+      where: eq(schema.tenants.id, tenantId),
+    });
+    if (!tenant) return;
+
+    const recipient = tenant.telegramUserId || tenant.phone;
+    const resolvedChannel = (channel || (tenant.telegramUserId ? "telegram" : "whatsapp")) as "telegram" | "whatsapp" | "app";
+    if (!recipient) return;
+
+    const adapter = this.deps.adapters.find((a) => a.name === resolvedChannel);
+    if (!adapter) return;
+
+    // ── Save full report to disk ──
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const slug = query.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 50);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const baseDir = process.env.MEMORY_BASE_DIR || "./data/tenants";
+    const reportsDir = path.join(baseDir, "..", "reports", tenantId);
+    await fs.mkdir(reportsDir, { recursive: true });
+    const reportFilename = `${timestamp}-${slug}.md`;
+    const reportPath = path.join(reportsDir, reportFilename);
+    await fs.writeFile(reportPath, `# Deep Research: ${query}\n\n_Generated: ${new Date().toISOString()}_\n\n${report}`);
+    logger.info({ tenantId, reportPath }, "Saved deep research report to disk");
+
+    // ── Summarize via Brain ──
+    const soul = await this.deps.memory.readSoul(tenantId);
+    const memoryContent = await this.deps.memory.readMemory(tenantId);
+
+    const systemPrompt = PromptBuilder.build({
+      soul,
+      memory: memoryContent,
+      skills: this.deps.availableSkills,
+      connections: [],
+      userName: tenant.name,
+      timezone: tenant.timezone ?? "UTC",
+    });
+
+    const truncatedReport = report.length > 8000 ? report.slice(0, 8000) + "\n\n...(report truncated)" : report;
+
+    const brain = new Brain(this.deps.llm, new ToolExecutor());
+    const result = await brain.process({
+      systemPrompt,
+      messages: [
+        {
+          role: "user",
+          content: `Here are the results of the deep research I requested about "${query}":\n\n${truncatedReport}\n\nSummarize this research for me in a clear, conversational way. Include key findings and cite sources where available. Start with "Your deep research on '${query}' is ready!" and end with: "Would you like me to email you the full report? Just share your email address and I'll send it over."`,
+        },
+      ],
+      maxTurns: 1,
+      tools: {},
+    });
+
+    await adapter.sendMessage({
+      tenantId,
+      channel: resolvedChannel,
+      recipient,
+      text: result.content,
+    });
+
+    // Store the report path in tenant's memory for follow-up email requests
+    await this.deps.memory.appendMemory(tenantId, `Deep research report on "${query}" saved at ${reportPath}`);
+  }
+
+  private async sendDeepResearchError(
+    tenantId: string,
+    channel: string | undefined,
+    query: string,
+  ): Promise<void> {
+    const tenant = await this.deps.db.query.tenants.findFirst({
+      where: eq(schema.tenants.id, tenantId),
+    });
+    if (!tenant) return;
+
+    const recipient = tenant.telegramUserId || tenant.phone;
+    const resolvedChannel = (channel || (tenant.telegramUserId ? "telegram" : "whatsapp")) as "telegram" | "whatsapp" | "app";
+    if (!recipient) return;
+
+    const adapter = this.deps.adapters.find((a) => a.name === resolvedChannel);
+    if (!adapter) return;
+
+    await adapter.sendMessage({
+      tenantId,
+      channel: resolvedChannel,
+      recipient,
+      text: `I wasn't able to complete the deep research on "${query}". Would you like me to try again, or do a quick search instead?`,
+    });
   }
 
   private async rescheduleDaily(job: typeof schema.scheduledJobs.$inferSelect, timezone: string): Promise<void> {
