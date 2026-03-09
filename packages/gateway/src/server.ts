@@ -149,5 +149,71 @@ export function createServer({ config, db, handler, adapters }: ServerDeps) {
     return { ok: true };
   });
 
+  // Called by the admin dashboard when a skill request is completed
+  app.post("/api/notify-skill-ready", async (request, reply) => {
+    const { skillRequestId } = request.body as { skillRequestId: string };
+
+    if (!skillRequestId) {
+      return reply.status(400).send({ error: "Missing skillRequestId" });
+    }
+    if (!db || !handler || !adapters) {
+      return reply.status(503).send({ error: "Gateway not ready" });
+    }
+
+    // Look up the skill request
+    const skillRequest = await db.query.skillRequests.findFirst({
+      where: eq(schema.skillRequests.id, skillRequestId),
+    });
+    if (!skillRequest) {
+      return reply.status(404).send({ error: "Skill request not found" });
+    }
+
+    // Look up the tenant to get their Telegram ID
+    const tenant = await db.query.tenants.findFirst({
+      where: eq(schema.tenants.id, skillRequest.tenantId),
+    });
+    if (!tenant || !tenant.telegramUserId) {
+      return reply.status(400).send({ error: "Tenant has no Telegram ID" });
+    }
+
+    // Find the Telegram adapter
+    const adapter = adapters.find((a) => a.name === "telegram");
+    if (!adapter) {
+      return reply.status(503).send({ error: "Telegram adapter not available" });
+    }
+
+    // Fire and forget — send notification through Brain
+    setImmediate(async () => {
+      try {
+        const syntheticMessage = {
+          id: randomUUID(),
+          tenantId: skillRequest.tenantId,
+          channel: "telegram" as const,
+          sender: tenant.telegramUserId!,
+          text: `[SYSTEM] A skill the user previously requested is now ready. Skill: "${skillRequest.skillName}". Their original request was: "${skillRequest.context}". Let them know this capability is now available, remind them what they asked for, and offer to help them try it out. Be brief and conversational.`,
+          timestamp: new Date(),
+        };
+
+        const response = await handler.handle(syntheticMessage);
+        await adapter.sendMessage(response);
+
+        // Mark as notified
+        await db
+          .update(schema.skillRequests)
+          .set({ notifiedAt: new Date() })
+          .where(eq(schema.skillRequests.id, skillRequestId));
+
+        logger.info(
+          { skillRequestId, tenantId: skillRequest.tenantId },
+          "Skill-ready notification sent"
+        );
+      } catch (err) {
+        logger.error({ err, skillRequestId }, "Skill-ready notification failed");
+      }
+    });
+
+    return { ok: true };
+  });
+
   return app;
 }
