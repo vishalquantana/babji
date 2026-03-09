@@ -215,5 +215,65 @@ export function createServer({ config, db, handler, adapters }: ServerDeps) {
     return { ok: true };
   });
 
+  // Admin endpoint: get all conversation sessions for a tenant
+  app.get("/api/admin/sessions/:tenantId", async (request, reply) => {
+    const { tenantId } = request.params as { tenantId: string };
+
+    if (!tenantId) {
+      return reply.status(400).send({ error: "Missing tenantId" });
+    }
+
+    try {
+      const fs = await import("node:fs/promises");
+      const path = await import("node:path");
+      const baseDir = process.env.MEMORY_BASE_DIR || "./data/tenants";
+      const sessionsDir = path.join(baseDir, tenantId, "sessions");
+
+      let files: string[];
+      try {
+        files = await fs.readdir(sessionsDir);
+      } catch {
+        return reply.send({ sessions: [] });
+      }
+
+      const sessions = [];
+      for (const file of files.filter((f) => f.endsWith(".jsonl"))) {
+        const sessionId = file.replace(".jsonl", "");
+        const content = await fs.readFile(path.join(sessionsDir, file), "utf-8");
+        const messages = content
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => {
+            try {
+              return JSON.parse(line);
+            } catch {
+              return null;
+            }
+          })
+          .filter(Boolean);
+
+        if (messages.length > 0) {
+          sessions.push({
+            sessionId,
+            messageCount: messages.length,
+            lastMessage: messages[messages.length - 1]?.timestamp,
+            messages,
+          });
+        }
+      }
+
+      // Sort by most recent activity
+      sessions.sort(
+        (a, b) => new Date(b.lastMessage || 0).getTime() - new Date(a.lastMessage || 0).getTime(),
+      );
+
+      return reply.send({ sessions });
+    } catch (err) {
+      logger.error({ err, tenantId }, "Failed to read sessions");
+      return reply.status(500).send({ error: "Failed to read sessions" });
+    }
+  });
+
   return app;
 }

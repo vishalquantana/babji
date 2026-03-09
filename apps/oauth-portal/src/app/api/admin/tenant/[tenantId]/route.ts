@@ -72,6 +72,23 @@ export async function GET(
         .limit(50),
     ]);
 
+    // Fetch conversation sessions from gateway
+    let sessions: unknown[] = [];
+    try {
+      const gatewayUrl = process.env.GATEWAY_URL || "http://127.0.0.1:3000";
+      const sessionsRes = await fetch(
+        `${gatewayUrl}/api/admin/sessions/${tenantId}`,
+      );
+      if (sessionsRes.ok) {
+        const sessionsData = (await sessionsRes.json()) as {
+          sessions?: unknown[];
+        };
+        sessions = sessionsData.sessions || [];
+      }
+    } catch {
+      // Gateway may be unreachable — sessions are optional
+    }
+
     return NextResponse.json({
       tenant,
       connections,
@@ -81,6 +98,7 @@ export async function GET(
       todos,
       creditBalance: creditBalance || null,
       creditTransactions,
+      sessions,
     });
   } finally {
     await close();

@@ -92,6 +92,19 @@ interface CreditTransaction {
   createdAt: string;
 }
 
+interface SessionMessage {
+  role: string;
+  content: string;
+  timestamp: string;
+}
+
+interface Session {
+  sessionId: string;
+  messageCount: number;
+  lastMessage: string;
+  messages: SessionMessage[];
+}
+
 interface TenantDetailData {
   tenant: Tenant;
   connections: Connection[];
@@ -101,6 +114,7 @@ interface TenantDetailData {
   todos: Todo[];
   creditBalance: CreditBalance | null;
   creditTransactions: CreditTransaction[];
+  sessions: Session[];
 }
 
 // ---------------------------------------------------------------------------
@@ -141,6 +155,43 @@ const tdStyle: React.CSSProperties = {
   padding: "8px 0",
   borderBottom: "1px solid #f5f5f5",
 };
+
+const messageBubbleStyle = (role: string): React.CSSProperties => ({
+  padding: "8px 12px",
+  borderRadius: 8,
+  marginBottom: 4,
+  maxWidth: "85%",
+  fontSize: 13,
+  lineHeight: 1.5,
+  backgroundColor: role === "user" ? "#f3f4f6" : "#eff6ff",
+  borderLeft: role === "user" ? "3px solid #6b7280" : "3px solid #3b82f6",
+  whiteSpace: "pre-wrap",
+  wordBreak: "break-word" as const,
+});
+
+const MESSAGE_TRUNCATE_LENGTH = 800;
+
+function formatSessionId(sessionId: string): string {
+  // "telegram-tg-6362978656" -> "Telegram (tg-6362978656)"
+  const parts = sessionId.split("-");
+  if (parts.length >= 2) {
+    const channel = parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
+    const rest = parts.slice(1).join("-");
+    return `${channel} (${rest})`;
+  }
+  return sessionId;
+}
+
+function formatTimestamp(ts: string): string {
+  const d = new Date(ts);
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -214,6 +265,8 @@ export function TenantDetailClient({ tenantId }: { tenantId: string }) {
   const [data, setData] = useState<TenantDetailData | null>(null);
   const [error, setError] = useState("");
   const [completingIds, setCompletingIds] = useState<Set<string>>(new Set());
+  const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
+  const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetch(`/api/admin/tenant/${tenantId}`)
@@ -242,7 +295,7 @@ export function TenantDetailClient({ tenantId }: { tenantId: string }) {
     return <p style={{ textAlign: "center", marginTop: 100, color: "#888" }}>Loading&hellip;</p>;
   }
 
-  const { tenant, connections, skillRequests, jobs, audit, todos, creditBalance, creditTransactions } = data;
+  const { tenant, connections, skillRequests, jobs, audit, todos, creditBalance, creditTransactions, sessions } = data;
 
   // Sort todos: pending first, then done
   const sortedTodos = [...todos].sort((a, b) => {
@@ -327,6 +380,157 @@ export function TenantDetailClient({ tenantId }: { tenantId: string }) {
           <StatItem label="Phone" value={tenant.phone || "\u2014"} />
           <StatItem label="Telegram ID" value={tenant.telegramUserId || "\u2014"} />
         </div>
+      </div>
+
+      {/* ---- Conversations ---- */}
+      <div style={cardStyle}>
+        <h2 style={{ fontSize: 18, marginTop: 0, marginBottom: 16 }}>
+          Conversations{" "}
+          <span style={{ fontSize: 13, fontWeight: 400, color: "#888" }}>
+            ({sessions?.length || 0} session{(sessions?.length || 0) !== 1 ? "s" : ""})
+          </span>
+        </h2>
+        {!sessions || sessions.length === 0 ? (
+          <p style={{ color: "#888" }}>No conversation logs available</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {sessions.map((session) => {
+              const isExpanded = expandedSessions.has(session.sessionId);
+              return (
+                <div
+                  key={session.sessionId}
+                  style={{
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 8,
+                    overflow: "hidden",
+                  }}
+                >
+                  {/* Session header */}
+                  <button
+                    onClick={() => {
+                      setExpandedSessions((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(session.sessionId)) {
+                          next.delete(session.sessionId);
+                        } else {
+                          next.add(session.sessionId);
+                        }
+                        return next;
+                      });
+                    }}
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "10px 14px",
+                      border: "none",
+                      background: isExpanded ? "#f9fafb" : "white",
+                      cursor: "pointer",
+                      fontSize: 13,
+                      textAlign: "left",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontSize: 12, color: "#9ca3af", width: 16, textAlign: "center" }}>
+                        {isExpanded ? "\u25BC" : "\u25B6"}
+                      </span>
+                      <span style={{ fontWeight: 500, color: "#111" }}>
+                        {formatSessionId(session.sessionId)}
+                      </span>
+                      <span style={{ color: "#6b7280", fontSize: 12 }}>
+                        {session.messageCount} message{session.messageCount !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+                    <span style={{ color: "#9ca3af", fontSize: 12 }}>
+                      {session.lastMessage ? timeAgo(session.lastMessage) : ""}
+                    </span>
+                  </button>
+
+                  {/* Expanded message list */}
+                  {isExpanded && (
+                    <div
+                      style={{
+                        padding: "12px 14px",
+                        borderTop: "1px solid #e5e7eb",
+                        background: "#fafafa",
+                        maxHeight: 500,
+                        overflowY: "auto",
+                      }}
+                    >
+                      {session.messages.map((msg, idx) => {
+                        const msgKey = `${session.sessionId}-${idx}`;
+                        const isTruncated =
+                          msg.content.length > MESSAGE_TRUNCATE_LENGTH &&
+                          !expandedMessages.has(msgKey);
+                        const displayContent = isTruncated
+                          ? msg.content.slice(0, MESSAGE_TRUNCATE_LENGTH) + "..."
+                          : msg.content;
+
+                        return (
+                          <div key={msgKey} style={{ marginBottom: 10 }}>
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                marginBottom: 2,
+                              }}
+                            >
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  color: msg.role === "user" ? "#374151" : "#2563eb",
+                                  textTransform: "uppercase",
+                                  letterSpacing: "0.5px",
+                                }}
+                              >
+                                {msg.role}
+                              </span>
+                              {msg.timestamp && (
+                                <span style={{ fontSize: 11, color: "#9ca3af" }}>
+                                  {formatTimestamp(msg.timestamp)}
+                                </span>
+                              )}
+                            </div>
+                            <div style={messageBubbleStyle(msg.role)}>{displayContent}</div>
+                            {msg.content.length > MESSAGE_TRUNCATE_LENGTH && (
+                              <button
+                                onClick={() => {
+                                  setExpandedMessages((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(msgKey)) {
+                                      next.delete(msgKey);
+                                    } else {
+                                      next.add(msgKey);
+                                    }
+                                    return next;
+                                  });
+                                }}
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  color: "#2563eb",
+                                  fontSize: 12,
+                                  cursor: "pointer",
+                                  padding: "2px 0",
+                                  marginTop: 2,
+                                }}
+                              >
+                                {expandedMessages.has(msgKey) ? "show less" : "show more"}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* ---- Connected Services ---- */}
