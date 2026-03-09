@@ -26,6 +26,12 @@ export interface GatewayConfig {
     apiToken: string;
     projectKey: string;
   };
+  people: {
+    enabled: boolean;
+    scrapinApiKey: string;
+    dataforseoLogin: string;
+    dataforseoPassword: string;
+  };
 }
 
 export function loadConfig(): GatewayConfig {
@@ -58,6 +64,12 @@ export function loadConfig(): GatewayConfig {
       email: process.env.JIRA_EMAIL || "",
       apiToken: process.env.JIRA_API_TOKEN || "",
       projectKey: process.env.JIRA_PROJECT_KEY || "BAB",
+    },
+    people: {
+      enabled: !!process.env.SCRAPIN_API_KEY && !!process.env.DATAFORSEO_LOGIN,
+      scrapinApiKey: process.env.SCRAPIN_API_KEY || "",
+      dataforseoLogin: process.env.DATAFORSEO_LOGIN || "",
+      dataforseoPassword: process.env.DATAFORSEO_PASSWORD || "",
     },
   };
 }

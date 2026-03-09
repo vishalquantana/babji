@@ -668,7 +668,75 @@ const checkWithTeacherSkill: SkillDefinition = {
   creditsPerAction: 0,
 };
 
-const allSkills: SkillDefinition[] = [gmailSkill, calendarSkill, googleAdsSkill, googleAnalyticsSkill, checkWithTeacherSkill];
+const peopleSkill: SkillDefinition = {
+  name: "people",
+  displayName: "People Research",
+  description: "Research people, companies, and find contact details using LinkedIn and public data.",
+  actions: [
+    {
+      name: "research_person",
+      description: "Search for a person by name and company/domain. Returns their professional profile, work history, and LinkedIn URL.",
+      parameters: {
+        name: {
+          type: "string",
+          required: true,
+          description: "Person's name (first, last, or full name)",
+        },
+        company_or_domain: {
+          type: "string",
+          required: true,
+          description: "Company name or website domain to narrow the search",
+        },
+      },
+    },
+    {
+      name: "lookup_profile",
+      description: "Look up a LinkedIn profile directly by URL. Use when the user provides a LinkedIn link.",
+      parameters: {
+        linkedin_url: {
+          type: "string",
+          required: true,
+          description: "Full LinkedIn profile URL (e.g. https://linkedin.com/in/username)",
+        },
+      },
+    },
+    {
+      name: "find_email",
+      description: "Find verified email addresses for a person given their name and company.",
+      parameters: {
+        first_name: {
+          type: "string",
+          required: true,
+          description: "Person's first name",
+        },
+        last_name: {
+          type: "string",
+          required: true,
+          description: "Person's last name",
+        },
+        company_name: {
+          type: "string",
+          required: true,
+          description: "Company name where the person works",
+        },
+      },
+    },
+    {
+      name: "research_company",
+      description: "Look up company information from a website domain. Returns industry, size, headquarters, and description.",
+      parameters: {
+        domain: {
+          type: "string",
+          required: true,
+          description: "Company website domain (e.g. quantana.com.au)",
+        },
+      },
+    },
+  ],
+  creditsPerAction: 1,
+};
+
+const allSkills: SkillDefinition[] = [gmailSkill, calendarSkill, googleAdsSkill, googleAnalyticsSkill, checkWithTeacherSkill, peopleSkill];
 
 /**
  * Load all registered skill definitions.

@@ -6,7 +6,7 @@ import type { LlmClient } from "@babji/agent";
 import { MemoryManager, SessionStore } from "@babji/memory";
 import { CreditLedger } from "@babji/credits";
 import { TokenVault } from "@babji/crypto";
-import { GmailHandler, GoogleCalendarHandler, GoogleAdsHandler, GoogleAnalyticsHandler } from "@babji/skills";
+import { GmailHandler, GoogleCalendarHandler, GoogleAdsHandler, GoogleAnalyticsHandler, PeopleHandler } from "@babji/skills";
 import type { SkillRequestManager } from "@babji/skills";
 import type { Database } from "@babji/db";
 import { schema } from "@babji/db";
@@ -99,6 +99,12 @@ export interface MessageHandlerDeps {
   vault: TokenVault;
   oauthPortalUrl: string;
   googleClientId: string;
+  peopleConfig?: {
+    enabled: boolean;
+    scrapinApiKey: string;
+    dataforseoLogin: string;
+    dataforseoPassword: string;
+  };
 }
 
 export class MessageHandler {
@@ -346,6 +352,14 @@ export class MessageHandler {
           throw new Error(`Unknown babji action: ${actionName}`);
         },
       });
+
+      // ── Register people research handler (server-side keys, always available) ──
+      if (this.deps.peopleConfig?.enabled) {
+        toolExecutor.registerSkill("people", new PeopleHandler(
+          { login: this.deps.peopleConfig.dataforseoLogin, password: this.deps.peopleConfig.dataforseoPassword },
+          { apiKey: this.deps.peopleConfig.scrapinApiKey },
+        ));
+      }
 
       // ── Build AI SDK tool definitions only for connected skills ──
       const connectedSkills = this.deps.availableSkills.filter(
