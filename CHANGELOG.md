@@ -6,6 +6,11 @@ All notable changes to Babji are documented here. Each entry notes whether the c
 
 ## 2026-03-09
 
+### Skill request "Complete & Notify" — proactive user notification [DEPLOYED]
+- **What:** When an admin marks a skill request as completed, Babji now proactively notifies the user via Telegram with a Brain-crafted conversational message ("Hey, remember when you asked about X? I can do that now!"). Added "Complete & Notify" button to admin dashboard. Fallback: if the proactive notification fails, the next conversation's system prompt includes the completed request so Brain mentions it naturally.
+- **Files:** `packages/db/src/schema.ts` (added `notifiedAt` column), `packages/gateway/src/server.ts` (new `/api/notify-skill-ready` endpoint), `apps/oauth-portal/src/app/api/admin/skill-requests/[requestId]/complete/route.ts` (new), `apps/oauth-portal/src/app/admin/dashboard/client.tsx` (button), `packages/agent/src/prompt-builder.ts` (fallback injection), `packages/gateway/src/message-handler.ts` (query + mark notified)
+- **DB migration:** `ALTER TABLE skill_requests ADD COLUMN notified_at TIMESTAMP`
+
 ### General Research skill (BAB-3) [DEPLOYED]
 - **What:** Added `general_research` skill with two actions: `quick_research` (Gemini Flash + Google Search grounding, synchronous) and `deep_research` (Gemini Deep Research Interactions API, async fire-and-forget with JobRunner delivery through Brain). Full deep research reports saved to disk at `/opt/babji/data/reports/`. After summary delivery, Babji offers to email the full report.
 - **Files:** `packages/skills/src/general-research/handler.ts` (new), `packages/skills/src/general-research/index.ts` (new), `packages/skills/src/registry.ts`, `packages/skills/src/index.ts`, `packages/gateway/src/message-handler.ts`, `packages/gateway/src/job-runner.ts`, `packages/gateway/src/index.ts`
