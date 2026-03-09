@@ -10,6 +10,7 @@ import type { SkillDefinition } from "@babji/types";
 import type { ChannelAdapter } from "./adapters/types.js";
 import { ensureValidToken } from "./token-refresh.js";
 import { logger } from "./logger.js";
+import { MeetingBriefingService } from "./meeting-briefing.js";
 
 /** Converts a local time string like "07:30" + IANA timezone to the next UTC timestamp for that local time */
 function nextUtcForLocalTime(localTime: string, timezone: string): Date {
@@ -102,6 +103,11 @@ export interface JobRunnerDeps {
   llm: LlmClient;
   memory: MemoryManager;
   availableSkills: SkillDefinition[];
+  peopleConfig?: {
+    scrapinApiKey: string;
+    dataforseoLogin: string;
+    dataforseoPassword: string;
+  };
 }
 
 export class JobRunner {
@@ -169,6 +175,9 @@ export class JobRunner {
         break;
       case "deep_research":
         await this.runDeepResearch(job);
+        break;
+      case "meeting_briefing":
+        await this.runMeetingBriefing(job);
         break;
       default:
         logger.warn({ jobType: job.jobType }, "Unknown job type, skipping");
@@ -264,6 +273,86 @@ export class JobRunner {
       });
 
       logger.info({ tenantId, events: result.count }, "Sent daily calendar summary");
+
+      // ── Meeting briefing integration ──
+      if (this.deps.peopleConfig) {
+        const briefingService = new MeetingBriefingService({
+          db: this.deps.db,
+          vault: this.deps.vault,
+          llm: this.deps.llm,
+          memory: this.deps.memory,
+          availableSkills: this.deps.availableSkills,
+          peopleConfig: this.deps.peopleConfig,
+        });
+
+        // Infer and store email domain if not yet known
+        let tenantDomain = tenant.emailDomain as string | null;
+        if (!tenantDomain) {
+          tenantDomain = briefingService.inferDomainFromEvents(result.events);
+          if (tenantDomain) {
+            await this.deps.db.update(schema.tenants)
+              .set({ emailDomain: tenantDomain })
+              .where(eq(schema.tenants.id, tenantId));
+            logger.info({ tenantId, emailDomain: tenantDomain }, "Inferred and stored tenant email domain");
+          }
+        }
+
+        if (tenantDomain) {
+          const meetings = briefingService.extractExternalAttendees(result.events, tenantDomain);
+
+          if (meetings.length > 0) {
+            const pref = tenant.meetingBriefingPref as string | null;
+            const totalExternals = meetings.reduce((sum, m) => sum + m.attendees.length, 0);
+
+            if (pref === "morning") {
+              try {
+                const briefing = await briefingService.generateBriefing(meetings, tenantId, tenant.name, timezone);
+                await adapter.sendMessage({
+                  tenantId,
+                  channel: channel as "telegram" | "whatsapp" | "app",
+                  recipient: recipient!,
+                  text: briefing,
+                });
+                logger.info({ tenantId, meetings: meetings.length, attendees: totalExternals }, "Sent morning meeting briefing");
+              } catch (err) {
+                logger.error({ err, tenantId }, "Failed to generate/send morning briefing");
+              }
+            } else if (pref === "pre_meeting") {
+              for (const meeting of meetings) {
+                if (!meeting.startTime || !meeting.startTime.includes("T")) continue;
+                const meetingTime = new Date(meeting.startTime);
+                const briefingTime = new Date(meetingTime.getTime() - 60 * 60 * 1000);
+                if (briefingTime <= new Date()) continue;
+
+                await this.deps.db.insert(schema.scheduledJobs).values({
+                  tenantId,
+                  jobType: "meeting_briefing",
+                  scheduleType: "once",
+                  scheduledAt: briefingTime,
+                  payload: {
+                    eventId: meeting.eventId,
+                    eventSummary: meeting.summary,
+                    startTime: meeting.startTime,
+                    attendees: meeting.attendees,
+                    tenantDomain,
+                  },
+                });
+                logger.info({ tenantId, meeting: meeting.summary, briefingAt: briefingTime.toISOString() }, "Scheduled pre-meeting briefing");
+              }
+            } else {
+              // Not enabled — suggest organically
+              const suggestionText = `\nYou have ${totalExternals} external attendee${totalExternals > 1 ? "s" : ""} across today's meetings. Want me to research them and send you a briefing before your meetings?`;
+              await adapter.sendMessage({
+                tenantId,
+                channel: channel as "telegram" | "whatsapp" | "app",
+                recipient: recipient!,
+                text: suggestionText,
+              });
+              logger.info({ tenantId, externals: totalExternals }, "Suggested meeting briefings to tenant");
+            }
+          }
+        }
+      }
     } catch (err) {
       logger.error({ err, tenantId }, "Failed to fetch/send calendar summary");
     }
@@ -462,6 +551,136 @@ export class JobRunner {
         .where(eq(schema.scheduledJobs.id, job.id));
       logger.info({ jobId: job.id, tenantId: payload.tenantId, query: payload.query }, "Deep research completed and delivered");
     }
+  }
+
+  private async runMeetingBriefing(job: typeof schema.scheduledJobs.$inferSelect): Promise<void> {
+    const tenantId = job.tenantId;
+    const payload = job.payload as {
+      eventId?: string;
+      eventSummary?: string;
+      startTime?: string;
+      attendees?: Array<{ email: string; displayName: string }>;
+      tenantDomain?: string;
+    } | null;
+
+    if (!payload?.attendees || payload.attendees.length === 0 || !payload?.tenantDomain) {
+      logger.warn({ jobId: job.id }, "meeting_briefing job missing attendees or tenantDomain in payload");
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "failed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      return;
+    }
+
+    const tenant = await this.deps.db.query.tenants.findFirst({
+      where: eq(schema.tenants.id, tenantId),
+    });
+    if (!tenant) {
+      logger.warn({ tenantId }, "Tenant not found for meeting briefing job");
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "failed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      return;
+    }
+
+    const recipient = tenant.telegramUserId || tenant.phone;
+    const channel = (tenant.telegramUserId ? "telegram" : "whatsapp") as "telegram" | "whatsapp" | "app";
+    if (!recipient) {
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "failed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      return;
+    }
+
+    const adapter = this.deps.adapters.find((a) => a.name === channel);
+    if (!adapter) {
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "failed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      return;
+    }
+
+    if (!this.deps.peopleConfig) {
+      logger.warn({ jobId: job.id }, "peopleConfig not available for meeting briefing");
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "failed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      return;
+    }
+
+    // Re-check if the meeting still exists (not cancelled)
+    const tokenResult = await ensureValidToken(tenantId, "google_calendar", this.deps.vault, this.deps.db);
+    if (tokenResult && tokenResult.status !== "expired" && payload.eventId) {
+      try {
+        const calHandler = new GoogleCalendarHandler(tokenResult.accessToken);
+        const timezone = tenant.timezone || "UTC";
+        const formatter = new Intl.DateTimeFormat("en-CA", {
+          timeZone: timezone,
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        });
+        const dateStr = formatter.format(new Date());
+        const timeMinISO = new Date(`${dateStr}T00:00:00+00:00`).toISOString();
+        const timeMaxISO = new Date(`${dateStr}T23:59:59+00:00`).toISOString();
+
+        const result = await calHandler.execute("list_events", {
+          time_min: timeMinISO,
+          time_max: timeMaxISO,
+          max_results: 50,
+        }) as { events: Array<Record<string, unknown>>; count: number };
+
+        const stillExists = result.events.some((e) => e.id === payload.eventId);
+        if (!stillExists) {
+          logger.info({ tenantId, eventId: payload.eventId }, "Meeting was cancelled, skipping briefing");
+          await this.deps.db.update(schema.scheduledJobs)
+            .set({ status: "completed", lastRunAt: new Date() })
+            .where(eq(schema.scheduledJobs.id, job.id));
+          return;
+        }
+      } catch (err) {
+        // If we can't verify, proceed with the briefing anyway
+        logger.warn({ err, tenantId }, "Could not verify meeting still exists, proceeding with briefing");
+      }
+    }
+
+    const timezone = tenant.timezone || "UTC";
+    const briefingService = new MeetingBriefingService({
+      db: this.deps.db,
+      vault: this.deps.vault,
+      llm: this.deps.llm,
+      memory: this.deps.memory,
+      availableSkills: this.deps.availableSkills,
+      peopleConfig: this.deps.peopleConfig,
+    });
+
+    const meeting = {
+      eventId: payload.eventId || "",
+      summary: payload.eventSummary || "(No title)",
+      startTime: payload.startTime || "",
+      attendees: payload.attendees,
+    };
+
+    try {
+      const briefing = await briefingService.generateBriefing([meeting], tenantId, tenant.name, timezone);
+      await adapter.sendMessage({
+        tenantId,
+        channel,
+        recipient,
+        text: briefing,
+      });
+      logger.info({ tenantId, meeting: meeting.summary, attendees: meeting.attendees.length }, "Sent pre-meeting briefing");
+    } catch (err) {
+      logger.error({ err, tenantId }, "Failed to generate/send pre-meeting briefing");
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "failed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      return;
+    }
+
+    // Mark as completed
+    await this.deps.db.update(schema.scheduledJobs)
+      .set({ status: "completed", lastRunAt: new Date() })
+      .where(eq(schema.scheduledJobs.id, job.id));
   }
 
   private async deliverDeepResearchReport(

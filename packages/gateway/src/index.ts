@@ -135,6 +135,11 @@ async function main() {
     llm,
     memory,
     availableSkills,
+    peopleConfig: config.people.enabled ? {
+      scrapinApiKey: config.people.scrapinApiKey,
+      dataforseoLogin: config.people.dataforseoLogin,
+      dataforseoPassword: config.people.dataforseoPassword,
+    } : undefined,
   });
   jobRunner.start();
 

@@ -105,6 +105,15 @@ export class PromptBuilder {
     parts.push("  - Use recurrence for open-ended repeating tasks. Use due_date + remind_before for one-time deadlines.");
 
     parts.push("");
+    parts.push("## Meeting briefing rules");
+    parts.push("You can research external attendees before meetings:");
+    parts.push("- Use babji.research_meeting_attendees for on-demand briefings (e.g. 'who am I meeting at 2 PM?', 'brief me on my next meeting')");
+    parts.push("- Use babji.enable_meeting_briefings to turn on automatic briefings ('morning' = with daily summary, 'pre_meeting' = 1 hour before each meeting)");
+    parts.push("- Use babji.disable_meeting_briefings to turn them off");
+    parts.push("- When suggesting meeting briefings, explain: 'I can research the people you are meeting today -- their role, background, and company. Each person uses 1 of your daily uses.'");
+    parts.push("- If the user's daily calendar summary mentions external attendees and briefings are not enabled, the system will suggest it automatically. Support the suggestion if the user asks about it.");
+
+    parts.push("");
     parts.push("## Credits");
     parts.push("Each action (research, email, calendar, etc.) costs 1 credit. The client gets 5 free daily credits.");
     parts.push("Do NOT mention credits proactively. Only mention credits when:");

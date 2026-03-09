@@ -407,6 +407,26 @@ export class MessageHandler {
           if (taskActions.includes(actionName)) {
             return todosHandler.execute(actionName, params);
           }
+          if (actionName === "enable_meeting_briefings") {
+            const timing = params.timing as string;
+            if (timing !== "morning" && timing !== "pre_meeting") {
+              return { success: false, error: "timing must be 'morning' or 'pre_meeting'" };
+            }
+            await this.deps.db.update(schema.tenants)
+              .set({ meetingBriefingPref: timing })
+              .where(eq(schema.tenants.id, tenantId));
+            const timingDesc = timing === "morning" ? "with your morning calendar summary" : "1 hour before each meeting";
+            return { success: true, message: `Meeting briefings enabled. I will research external attendees and send you a briefing ${timingDesc}. Each person researched uses 1 of your daily uses.` };
+          }
+          if (actionName === "disable_meeting_briefings") {
+            await this.deps.db.update(schema.tenants)
+              .set({ meetingBriefingPref: null })
+              .where(eq(schema.tenants.id, tenantId));
+            return { success: true, message: "Meeting briefings disabled." };
+          }
+          if (actionName === "research_meeting_attendees") {
+            return this.handleOnDemandBriefing(tenantId, tenant, params.meeting_query as string);
+          }
           throw new Error(`Unknown babji action: ${actionName}`);
         },
       });
@@ -703,6 +723,126 @@ export class MessageHandler {
       recipient: sender,
       text: `Click the link below to connect your ${link.displayName}:\n\n${url}`,
     };
+  }
+
+  /**
+   * Handle on-demand meeting briefing: find a matching meeting, extract
+   * external attendees, research them, and return a formatted briefing.
+   */
+  private async handleOnDemandBriefing(
+    tenantId: string,
+    tenant: typeof schema.tenants.$inferSelect,
+    meetingQuery?: string,
+  ): Promise<Record<string, unknown>> {
+    if (!this.deps.peopleConfig?.enabled) {
+      return { success: false, error: "People research is not configured." };
+    }
+
+    // Get calendar token
+    const tokenResult = await ensureValidToken(tenantId, "google_calendar", this.deps.vault, this.deps.db);
+    if (!tokenResult || tokenResult.status === "expired") {
+      return { success: false, error: "Google Calendar is not connected or the token has expired. Please reconnect by saying 'connect calendar'." };
+    }
+
+    // Fetch today's events
+    const now = new Date();
+    const timezone = tenant.timezone || "UTC";
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const dateStr = formatter.format(now);
+    const timeMinISO = new Date(`${dateStr}T00:00:00+00:00`).toISOString();
+    const timeMaxISO = new Date(`${dateStr}T23:59:59+00:00`).toISOString();
+
+    const calHandler = new GoogleCalendarHandler(tokenResult.accessToken);
+    const result = await calHandler.execute("list_events", {
+      time_min: timeMinISO,
+      time_max: timeMaxISO,
+      max_results: 20,
+    }) as { events: Array<Record<string, unknown>>; count: number };
+
+    if (result.count === 0) {
+      return { success: false, error: "No events on your calendar today." };
+    }
+
+    // Fuzzy-match meeting by query
+    let matchedEvents = result.events;
+    if (meetingQuery) {
+      const queryWords = meetingQuery.toLowerCase().split(/\s+/).filter(Boolean);
+      matchedEvents = result.events.filter((ev) => {
+        const summary = ((ev.summary as string) || "").toLowerCase();
+        const start = ((ev.start as string) || "").toLowerCase();
+        return queryWords.some((w) => summary.includes(w) || start.includes(w));
+      });
+      if (matchedEvents.length === 0) {
+        // Fall back to all events
+        matchedEvents = result.events;
+      }
+    }
+
+    // Determine tenant domain
+    let tenantDomain = tenant.emailDomain as string | null;
+    if (!tenantDomain) {
+      tenantDomain = this.inferDomainFromEvents(result.events);
+      if (tenantDomain) {
+        await this.deps.db.update(schema.tenants)
+          .set({ emailDomain: tenantDomain })
+          .where(eq(schema.tenants.id, tenantId));
+      }
+    }
+
+    if (!tenantDomain) {
+      return { success: false, error: "Could not determine your email domain from calendar events. Please try again after your calendar has events with attendees." };
+    }
+
+    // Extract external attendees
+    const { MeetingBriefingService } = await import("./meeting-briefing.js");
+    const briefingService = new MeetingBriefingService({
+      db: this.deps.db,
+      vault: this.deps.vault,
+      llm: this.deps.llm,
+      memory: this.deps.memory,
+      availableSkills: this.deps.availableSkills,
+      peopleConfig: {
+        scrapinApiKey: this.deps.peopleConfig.scrapinApiKey,
+        dataforseoLogin: this.deps.peopleConfig.dataforseoLogin,
+        dataforseoPassword: this.deps.peopleConfig.dataforseoPassword,
+      },
+    });
+
+    const meetings = briefingService.extractExternalAttendees(matchedEvents, tenantDomain);
+    if (meetings.length === 0) {
+      return { success: true, message: "No external attendees found in the matching meeting(s). All attendees appear to be from your organization." };
+    }
+
+    const briefing = await briefingService.generateBriefing(meetings, tenantId, tenant.name, timezone);
+    return { success: true, briefing };
+  }
+
+  /**
+   * Infer the tenant's email domain from calendar events by checking
+   * organizer or creator email. Skips calendar.google.com domains.
+   */
+  private inferDomainFromEvents(events: Array<Record<string, unknown>>): string | null {
+    for (const event of events) {
+      for (const field of ["organizer", "creator"] as const) {
+        const entity = event[field] as { email?: string } | undefined;
+        if (!entity?.email) continue;
+
+        const domain = entity.email.split("@")[1]?.toLowerCase();
+        if (
+          domain &&
+          domain !== "calendar.google.com" &&
+          domain !== "group.calendar.google.com"
+        ) {
+          return domain;
+        }
+      }
+    }
+    return null;
   }
 
   /**
