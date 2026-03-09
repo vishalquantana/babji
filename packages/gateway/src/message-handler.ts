@@ -308,6 +308,18 @@ export class MessageHandler {
         if (tokenResult.status === "expired") {
           expiredProviders.push(conn.provider);
           logger.warn({ tenantId, provider: conn.provider }, "Token expired and refresh failed");
+
+          // Register a stub handler so the Brain gets a clear error instead of
+          // the tool silently disappearing (which causes confabulated responses)
+          const displayName = (MessageHandler.PROVIDER_CONFIGS[conn.provider]?.displayName) ?? conn.provider.replace(/_/g, " ");
+          const skillName = conn.provider;
+          toolExecutor.registerSkill(skillName, {
+            execute: async () => ({
+              error: true,
+              message: `Your ${displayName} connection has expired. Please reconnect by saying "connect ${skillName}".`,
+            }),
+          });
+
           continue;
         }
 
@@ -331,12 +343,10 @@ export class MessageHandler {
         }
       }
 
-      // If any tokens are expired, tell the user before proceeding
+      // If any tokens are expired, handle gracefully
       if (expiredProviders.length > 0) {
         const providerNames = expiredProviders.map((p) => p.replace(/_/g, " ")).join(", ");
         const reconnectCmds = expiredProviders.map((p) => `"connect ${p.replace("google_", "")}"`).join(" or ");
-
-        // Remove expired providers from connected list so the Brain doesn't try to use them
         const validProviders = connectedProviders.filter((p) => !expiredProviders.includes(p));
 
         // If ALL providers are expired and the user's message likely needs them, warn immediately
@@ -349,10 +359,10 @@ export class MessageHandler {
           };
         }
 
-        // Some expired — prepend a warning to the response later
-        // Update connectedProviders to only include valid ones
-        connectedProviders.length = 0;
-        connectedProviders.push(...validProviders);
+        // Some expired — keep them in connectedProviders so the Brain can still
+        // call the stub handlers and receive a clear error message instead of
+        // the tools silently disappearing (which causes confabulated responses).
+        // The stub handlers registered above will return actionable error messages.
       }
 
       // ── Register "babji" skill handler (check_with_teacher, connect_service, task actions) ──
