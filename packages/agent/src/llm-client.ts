@@ -31,6 +31,11 @@ interface ChatMessage {
 interface LlmResponse {
   content: string;
   toolCalls: ToolCall[];
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  };
 }
 
 /** Separator used in tool names: skillName__actionName */
@@ -162,6 +167,11 @@ export class MultiModelLlmClient {
         return {
           content: result.text,
           toolCalls,
+          usage: result.usage ? {
+            inputTokens: result.usage.inputTokens ?? 0,
+            outputTokens: result.usage.outputTokens ?? 0,
+            totalTokens: result.usage.totalTokens ?? 0,
+          } : undefined,
         };
       } catch (err) {
         console.error(`LLM provider ${provider} failed:`, err);

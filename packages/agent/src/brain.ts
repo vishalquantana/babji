@@ -10,6 +10,11 @@ interface ChatMessage {
 interface LlmResponse {
   content: string;
   toolCalls: ToolCall[];
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  };
 }
 
 export interface LlmClient {
@@ -30,6 +35,12 @@ interface ProcessInput {
 interface ProcessOutput {
   content: string;
   toolCallsMade: ToolCall[];
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    llmCalls: number;
+  };
 }
 
 export class Brain {
@@ -45,6 +56,7 @@ export class Brain {
     ];
 
     const allToolCalls: ToolCall[] = [];
+    const usageAccum = { inputTokens: 0, outputTokens: 0, totalTokens: 0, llmCalls: 0 };
 
     for (let turn = 0; turn < input.maxTurns; turn++) {
       // On the last turn, don't offer tools so the LLM must produce a text response
@@ -60,13 +72,21 @@ export class Brain {
           content:
             "I'm having trouble thinking right now. Please try again in a moment.",
           toolCallsMade: allToolCalls,
+          usage: usageAccum,
         };
       }
+
+      if (response.usage) {
+        usageAccum.inputTokens += response.usage.inputTokens;
+        usageAccum.outputTokens += response.usage.outputTokens;
+        usageAccum.totalTokens += response.usage.totalTokens;
+      }
+      usageAccum.llmCalls++;
 
       console.log(`[Brain] Turn ${turn}: text=${(response.content ?? "").length}chars, toolCalls=${response.toolCalls.length}`);
 
       if (response.toolCalls.length === 0) {
-        return { content: response.content, toolCallsMade: allToolCalls };
+        return { content: response.content, toolCallsMade: allToolCalls, usage: usageAccum };
       }
 
       // Execute tool calls and collect results
@@ -107,6 +127,7 @@ export class Brain {
     return {
       content: "I ran out of thinking steps. Let me try a different approach.",
       toolCallsMade: allToolCalls,
+      usage: usageAccum,
     };
   }
 }
