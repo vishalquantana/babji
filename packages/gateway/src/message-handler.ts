@@ -152,11 +152,6 @@ export class MessageHandler {
       if (!tenant) {
         logger.info({ sender, channel }, "New sender — routing to onboarding");
         const result = await this.deps.onboarding.handle(message);
-        // If onboarding just created a Telegram user, it asked for their phone number.
-        // Flag this so we know to intercept the next numeric message as a phone number.
-        if (channel === "telegram" && result.tenantId !== "onboarding") {
-          this.askedForPhone.add(result.tenantId);
-        }
         return result;
       }
 
@@ -233,19 +228,7 @@ export class MessageHandler {
 
             return {
               tenantId, channel, recipient: sender,
-              text: [
-                `Saved! ${tzNote}`,
-                "",
-                "Here's what I can help with:",
-                "- Email: read, send, block, unsubscribe",
-                "- Calendar: view, create, reschedule events",
-                "- Social media: post to Instagram, Facebook, LinkedIn, X",
-                "- Ads: manage Google Ads and Meta Ads campaigns",
-                "",
-                "To get started, just connect a service by saying something like 'connect my Gmail'.",
-                "",
-                "What would you like to do first?",
-              ].join("\n"),
+              text: `Saved! ${tzNote}\n\nWhat can I help you with?`,
             };
           }
 
@@ -265,17 +248,7 @@ export class MessageHandler {
           this.askedForPhone.delete(tenantId);
           return {
             tenantId, channel, recipient: sender,
-            text: [
-              "No worries! Here's what I can help with:",
-              "- Email: read, send, block, unsubscribe",
-              "- Calendar: view, create, reschedule events",
-              "- Social media: post to Instagram, Facebook, LinkedIn, X",
-              "- Ads: manage Google Ads and Meta Ads campaigns",
-              "",
-              "To get started, just connect a service by saying something like 'connect my Gmail'.",
-              "",
-              "What would you like to do first?",
-            ].join("\n"),
+            text: "No worries! What can I help you with?",
           };
         }
 

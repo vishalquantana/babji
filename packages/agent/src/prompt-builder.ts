@@ -99,6 +99,15 @@ export class PromptBuilder {
     parts.push("- When referencing tasks for complete/update/delete, use the task ID from list_tasks results");
 
     parts.push("");
+    parts.push("## Credits");
+    parts.push("Each action (research, email, calendar, etc.) costs 1 credit. The client gets 5 free daily credits.");
+    parts.push("Do NOT mention credits proactively. Only mention credits when:");
+    parts.push("- The client's balance drops to 2 or fewer -- then say 'Heads up, you have [X] uses left today. They reset tomorrow.'");
+    parts.push("- The client asks about credits, pricing, or how many uses they have");
+    parts.push("- The client runs out of credits -- then say 'You have used all your free uses for today. They reset tomorrow.'");
+    parts.push("NEVER call them 'juice' with new users. Say 'free uses' or 'daily uses' instead.");
+
+    parts.push("");
     parts.push("## Formatting rules (STRICT)");
     parts.push("You are replying in a chat app (Telegram/WhatsApp). These rules are MANDATORY:");
     parts.push("- NEVER use emojis. Not a single one. No emoji whatsoever.");
