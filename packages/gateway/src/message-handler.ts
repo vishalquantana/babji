@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import type { BabjiMessage, OutboundMessage, SkillDefinition } from "@babji/types";
 import { Brain, PromptBuilder, ToolExecutor, skillsToAiTools, MemoryExtractor } from "@babji/agent";
 import type { LlmClient } from "@babji/agent";
@@ -421,6 +421,22 @@ export class MessageHandler {
       );
       const aiTools = skillsToAiTools(connectedSkills);
 
+      // ── Query completed-but-unnotified skill requests for next-conversation fallback ──
+      const completedRequests = await this.deps.db.select()
+        .from(schema.skillRequests)
+        .where(
+          and(
+            eq(schema.skillRequests.tenantId, tenantId),
+            eq(schema.skillRequests.status, "completed"),
+            isNull(schema.skillRequests.notifiedAt),
+          )
+        );
+
+      const completedSkillRequests = completedRequests.map((r) => ({
+        skillName: r.skillName,
+        context: r.context,
+      }));
+
       // Build system prompt from soul + memory + skills
       const systemPrompt = PromptBuilder.build({
         soul,
@@ -429,6 +445,7 @@ export class MessageHandler {
         connections: connectedProviders,
         userName: tenant.name,
         timezone: tenant.timezone ?? "UTC",
+        completedSkillRequests,
       });
 
       // Create per-request Brain with the tenant's ToolExecutor
@@ -472,6 +489,16 @@ export class MessageHandler {
         { tenantId, channel, toolCalls: result.toolCallsMade.length },
         "Message processed",
       );
+
+      // ── Mark completed skill requests as notified ──
+      if (completedRequests.length > 0) {
+        for (const req of completedRequests) {
+          await this.deps.db.update(schema.skillRequests)
+            .set({ notifiedAt: new Date() })
+            .where(eq(schema.skillRequests.id, req.id));
+        }
+        logger.info({ tenantId, count: completedRequests.length }, "Marked skill requests as notified");
+      }
 
       // Fire-and-forget memory extraction — don't block the response
       const currentTz = tenant.timezone ?? "UTC";

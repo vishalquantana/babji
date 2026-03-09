@@ -61,6 +61,16 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
           findMany: vi.fn().mockResolvedValue([]),
         },
       },
+      select: vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([]),
+        }),
+      }),
+      update: vi.fn().mockReturnValue({
+        set: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue(undefined),
+        }),
+      }),
     },
     vault: {
       retrieve: vi.fn().mockResolvedValue(null),

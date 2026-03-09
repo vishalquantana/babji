@@ -7,6 +7,7 @@ interface PromptContext {
   connections: string[];
   userName?: string;
   timezone?: string;
+  completedSkillRequests?: Array<{ skillName: string; context: string }>;
 }
 
 export class PromptBuilder {
@@ -63,16 +64,39 @@ export class PromptBuilder {
     if (disconnectedSkills.length > 0) {
       parts.push("");
       parts.push("## Services available to connect (NOT yet connected)");
-      parts.push("These services are NOT connected yet. You CANNOT call their tools. But when the user asks about something that needs one of these services:");
+      parts.push("These services are NOT connected yet. You CANNOT call their tools.");
+      parts.push("When the user asks about something that needs one of these services:");
       parts.push("1. Acknowledge what they want to do and show you understand their goal");
       parts.push("2. Briefly explain what you'll be able to help with once connected (be specific to their request)");
-      parts.push('3. Offer to connect right now: "Want me to set that up? Just type connect <service>" -- keep it natural, one line');
-      parts.push("Do NOT just say 'service not connected, type connect X'. That's robotic. Be helpful and conversational.");
-      parts.push("NEVER make up a URL -- just tell them what to type.");
+      parts.push("3. Offer to connect -- and if the user agrees (says yes, sure, ok, etc.), immediately call babji.connect_service with the service name. Do NOT ask them to type a command.");
+      parts.push("IMPORTANT: When you offer to connect and the user says yes, call babji.connect_service right away. The tool returns a short URL -- include it in your reply so the user can tap it.");
+      parts.push("NEVER tell the user to type 'connect X'. NEVER make up a URL. Always use the connect_service tool to generate the real link.");
       for (const skill of disconnectedSkills) {
-        parts.push(`- ${skill.displayName}: ${skill.description} -> connect command: "connect ${skill.name}"`);
+        parts.push(`- ${skill.displayName}: ${skill.description} (service_name: "${skill.name}")`);
       }
     }
+
+    if (ctx.completedSkillRequests && ctx.completedSkillRequests.length > 0) {
+      parts.push("");
+      parts.push("## Recently fulfilled skill requests");
+      parts.push("The following capabilities were recently added based on this client's requests. Mention this naturally at the start of the conversation -- let them know the feature is ready and offer to help them try it:");
+      for (const req of ctx.completedSkillRequests) {
+        parts.push(`- "${req.skillName}": They originally asked for: ${req.context}`);
+      }
+    }
+
+    parts.push("");
+    parts.push("## Task management rules");
+    parts.push("You have built-in task management. When users mention todos, reminders, or things to remember:");
+    parts.push("- Use babji.add_task to create todos. Pick a smart remind_before default:");
+    parts.push("  - Gift/purchase: '5d' to '7d' (shipping time)");
+    parts.push("  - Preparation (presentation, report): '2d' to '3d'");
+    parts.push("  - Meeting/call: '1d'");
+    parts.push("  - General deadline: '1d'");
+    parts.push("- After creating a task with a reminder, ALWAYS confirm the timing: 'I will remind you on [date] -- [X] days before. Want me to change the timing?'");
+    parts.push("- When the user asks 'what should I work on today', 'my todos', 'what is on my plate', call babji.list_tasks");
+    parts.push("- Present task lists grouped by urgency: overdue first, then today, this week, then backlog");
+    parts.push("- When referencing tasks for complete/update/delete, use the task ID from list_tasks results");
 
     parts.push("");
     parts.push("## Formatting rules (STRICT)");
