@@ -40,7 +40,7 @@ describe("OnboardingHandler", () => {
     const result = await handler.handle(makeMessage({ text: "" }));
 
     expect(result.text).toContain("I'm Babji");
-    expect(result.text).toContain("what should I call you");
+    expect(result.text).toContain("What should I call you");
     expect(result.channel).toBe("whatsapp");
     expect(result.recipient).toBe("+1234567890");
     expect(result.tenantId).toBe("onboarding");
@@ -52,7 +52,7 @@ describe("OnboardingHandler", () => {
 
     const result = await handler.handle(makeMessage({ text: "   " }));
 
-    expect(result.text).toContain("what should I call you");
+    expect(result.text).toContain("What should I call you");
   });
 
   // ── Successful onboarding ─────────────────────────────────────────
@@ -66,7 +66,7 @@ describe("OnboardingHandler", () => {
     );
 
     expect(result.text).toContain("John");
-    expect(result.text).toContain("5 free daily credits");
+    expect(result.text).toContain("what kind of work");
     expect(deps.db.insert).toHaveBeenCalled();
 
     // Verify insert().values() was called with correct shape
@@ -91,6 +91,8 @@ describe("OnboardingHandler", () => {
     );
 
     expect(result.text).toContain("Sarah");
+    expect(result.text).toContain("what kind of work");
+    expect(result.text).not.toContain("phone");
 
     const valuesCall = deps.db.insert.mock.results[0].value.values;
     const insertedData = valuesCall.mock.calls[0][0];
@@ -122,7 +124,7 @@ describe("OnboardingHandler", () => {
 
     const result = await handler.handle(makeMessage({ text: "A" }));
 
-    expect(result.text).toContain("what should I call you");
+    expect(result.text).toContain("What should I call you");
     expect(deps.db.insert).not.toHaveBeenCalled();
   });
 
@@ -132,7 +134,7 @@ describe("OnboardingHandler", () => {
 
     const result = await handler.handle(makeMessage({ text: "12345" }));
 
-    expect(result.text).toContain("what should I call you");
+    expect(result.text).toContain("What should I call you");
     expect(deps.db.insert).not.toHaveBeenCalled();
   });
 
@@ -166,5 +168,33 @@ describe("OnboardingHandler", () => {
     );
 
     expect(result.recipient).toBe("+9876543210");
+  });
+
+  it("onboarded message asks about work, not credits or phone", async () => {
+    const deps = makeDeps();
+    const handler = new OnboardingHandler(deps as any);
+
+    const result = await handler.handle(
+      makeMessage({ text: "Priya", channel: "telegram", sender: "tg-999" }),
+    );
+
+    expect(result.text).toContain("Priya");
+    expect(result.text).toContain("what kind of work");
+    expect(result.text).not.toContain("credit");
+    expect(result.text).not.toContain("juice");
+    expect(result.text).not.toContain("phone");
+  });
+
+  it("sets onboardingPhase to 'role' when creating tenant", async () => {
+    const deps = makeDeps();
+    const handler = new OnboardingHandler(deps as any);
+
+    await handler.handle(
+      makeMessage({ text: "Raj", channel: "telegram", sender: "tg-100" }),
+    );
+
+    const valuesCall = deps.db.insert.mock.results[0].value.values;
+    const insertedData = valuesCall.mock.calls[0][0];
+    expect(insertedData.onboardingPhase).toBe("role");
   });
 });

@@ -55,6 +55,7 @@ export class OnboardingHandler {
         plan: "free",
         timezone: detectedTz ?? "UTC",
         containerStatus: "provisioning",
+        onboardingPhase: "role",
       });
 
       // Initialize memory files and credits in parallel
@@ -90,45 +91,19 @@ export class OnboardingHandler {
 
   private welcomeMessage(): string {
     return [
-      "Hey there! I'm Babji, your AI business assistant.",
+      "Hey there! I'm Babji -- think of me as your business helper who lives right here in this chat.",
       "",
-      "I can help you manage your email, calendar, social media, ads, and more — all through this chat!",
-      "",
-      "To get started, what should I call you?",
+      "What should I call you?",
     ].join("\n");
   }
 
-  private onboardedMessage(name: string, channel: string): string {
-    const lines = [
+  private onboardedMessage(name: string, _channel: string): string {
+    return [
       `Nice to meet you, ${name}!`,
       "",
-      "You're all set up with 5 free daily credits (I call them 'juice').",
-    ];
-
-    // Ask for phone number if this is a Telegram user (we don't have their phone)
-    if (channel === "telegram") {
-      lines.push(
-        "",
-        "One quick thing — could you share your phone number with country code? (e.g. +91 98765 43210)",
-        "This helps me get your timezone right and link your account if you ever use WhatsApp too.",
-        "You can also type 'skip' to skip this step.",
-      );
-    } else {
-      lines.push(
-        "",
-        "Here's what I can help with:",
-        "- Email: read, send, block, unsubscribe",
-        "- Calendar: view, create, reschedule events",
-        "- Social media: post to Instagram, Facebook, LinkedIn, X",
-        "- Ads: manage Google Ads and Meta Ads campaigns",
-        "",
-        "To get started, just connect a service by saying something like 'connect my Gmail'.",
-        "",
-        "What would you like to do first?",
-      );
-    }
-
-    return lines.join("\n");
+      "Quick question -- what kind of work do you do?",
+      "Just tell me in a line, like \"I run a rice shop\" or \"I do digital marketing\".",
+    ].join("\n");
   }
 
   private reply(original: BabjiMessage, text: string): OutboundMessage {
