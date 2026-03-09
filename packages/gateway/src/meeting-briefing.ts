@@ -5,26 +5,18 @@ import { Brain, ToolExecutor } from "@babji/agent";
 import { MemoryManager } from "@babji/memory";
 import type { SkillDefinition } from "@babji/types";
 import { TokenVault } from "@babji/crypto";
+import { eq } from "drizzle-orm";
+import { schema } from "@babji/db";
 import { logger } from "./logger.js";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
 
 // ── Constants ──
 
 const MAX_MEETINGS = 5;
 const MAX_ATTENDEES = 10;
-const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const PENDING_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const VERIFIED_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 // ── Interfaces ──
-
-interface CacheEntry {
-  profile: Record<string, unknown>;
-  fetchedAt: string;
-}
-
-interface BriefingCache {
-  [email: string]: CacheEntry;
-}
 
 interface AttendeeInfo {
   email: string;
@@ -121,23 +113,30 @@ export class MeetingBriefingService {
   }
 
   /**
-   * Research a single attendee via PeopleHandler with disk caching.
-   * Returns the cached profile if it's less than 7 days old, otherwise
-   * calls the People API and caches the result.
+   * Research a single attendee via PeopleHandler with global profile directory caching.
+   * Returns the cached profile if it's fresh (7 days for pending, 30 days for verified/corrected),
+   * otherwise calls the People API and upserts the result into the profile_directory table.
    */
   async researchAttendee(
     email: string,
     displayName: string,
-    tenantId: string,
+    _tenantId: string,
   ): Promise<Record<string, unknown>> {
-    // Check cache first
-    const cache = await this.loadCache(tenantId);
-    const cached = cache[email.toLowerCase()];
-    if (cached) {
-      const age = Date.now() - new Date(cached.fetchedAt).getTime();
-      if (age < CACHE_TTL_MS) {
-        logger.debug({ email, tenantId }, "Using cached attendee profile");
-        return cached.profile;
+    const normalizedEmail = email.toLowerCase();
+
+    // Check global profile directory
+    const existing = await this.deps.db.query.profileDirectory.findFirst({
+      where: eq(schema.profileDirectory.email, normalizedEmail),
+    });
+
+    if (existing?.scrapedData && existing.scrapedAt) {
+      const age = Date.now() - new Date(existing.scrapedAt).getTime();
+      const isVerified = existing.status === "verified" || existing.status === "corrected";
+      const maxAge = isVerified ? VERIFIED_CACHE_TTL_MS : PENDING_CACHE_TTL_MS;
+
+      if (age < maxAge && existing.status !== "failed") {
+        logger.debug({ email, status: existing.status }, "Using cached profile from directory");
+        return existing.scrapedData;
       }
     }
 
@@ -154,18 +153,50 @@ export class MeetingBriefingService {
         company_or_domain: domain,
       }) as Record<string, unknown>;
 
-      // Cache the result
-      cache[email.toLowerCase()] = {
-        profile: result,
-        fetchedAt: new Date().toISOString(),
-      };
-      await this.saveCache(tenantId, cache);
+      // Upsert into profile_directory
+      const linkedinUrl = (result.linkedInUrl as string) || null;
+      await this.deps.db.insert(schema.profileDirectory).values({
+        email: normalizedEmail,
+        displayName,
+        linkedinUrl,
+        scrapedData: result,
+        status: "pending",
+        scrapedAt: new Date(),
+      }).onConflictDoUpdate({
+        target: schema.profileDirectory.email,
+        set: {
+          displayName,
+          linkedinUrl,
+          scrapedData: result,
+          status: "pending",
+          scrapedAt: new Date(),
+        },
+      });
 
       return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logger.error({ err, email, tenantId }, "Failed to research attendee");
-      return { found: false, email, displayName, error: message };
+      logger.error({ err, email }, "Failed to research attendee");
+
+      const errorData: Record<string, unknown> = { found: false, email, displayName, error: message };
+
+      await this.deps.db.insert(schema.profileDirectory).values({
+        email: normalizedEmail,
+        displayName,
+        scrapedData: errorData,
+        status: "failed",
+        scrapedAt: new Date(),
+      }).onConflictDoUpdate({
+        target: schema.profileDirectory.email,
+        set: {
+          displayName,
+          scrapedData: errorData,
+          status: "failed",
+          scrapedAt: new Date(),
+        },
+      });
+
+      return errorData;
     }
   }
 
@@ -280,24 +311,4 @@ export class MeetingBriefingService {
     return null;
   }
 
-  // ── Private helpers ──
-
-  private async loadCache(tenantId: string): Promise<BriefingCache> {
-    const baseDir = process.env.MEMORY_BASE_DIR || "./data/tenants";
-    const cachePath = path.join(baseDir, tenantId, "briefing-cache.json");
-    try {
-      const data = await fs.readFile(cachePath, "utf-8");
-      return JSON.parse(data) as BriefingCache;
-    } catch {
-      return {};
-    }
-  }
-
-  private async saveCache(tenantId: string, cache: BriefingCache): Promise<void> {
-    const baseDir = process.env.MEMORY_BASE_DIR || "./data/tenants";
-    const dir = path.join(baseDir, tenantId);
-    await fs.mkdir(dir, { recursive: true });
-    const cachePath = path.join(dir, "briefing-cache.json");
-    await fs.writeFile(cachePath, JSON.stringify(cache, null, 2), "utf-8");
-  }
 }
