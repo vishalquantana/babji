@@ -622,7 +622,32 @@ const googleAnalyticsSkill: SkillDefinition = {
   creditsPerAction: 1,
 };
 
-const allSkills: SkillDefinition[] = [gmailSkill, calendarSkill, googleAdsSkill, googleAnalyticsSkill];
+const checkWithTeacherSkill: SkillDefinition = {
+  name: "babji",
+  displayName: "Babji",
+  description: "Internal actions for Babji itself.",
+  actions: [
+    {
+      name: "check_with_teacher",
+      description: "Request that the development team add a new capability. Use this when the user asks for something you cannot do with your current skills. Describe what the user wants so the team can build it.",
+      parameters: {
+        skill_name: {
+          type: "string",
+          required: true,
+          description: "A short label for the requested capability (e.g. 'whatsapp_messaging', 'twitter_post', 'invoice_generator')",
+        },
+        context: {
+          type: "string",
+          required: true,
+          description: "What the user asked for and why, in enough detail for the team to understand the request",
+        },
+      },
+    },
+  ],
+  creditsPerAction: 0,
+};
+
+const allSkills: SkillDefinition[] = [gmailSkill, calendarSkill, googleAdsSkill, googleAnalyticsSkill, checkWithTeacherSkill];
 
 /**
  * Load all registered skill definitions.

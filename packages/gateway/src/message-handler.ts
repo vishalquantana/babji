@@ -332,6 +332,21 @@ export class MessageHandler {
         connectedProviders.push(...validProviders);
       }
 
+      // ── Register "check with my teacher" handler (always available) ──
+      toolExecutor.registerSkill("babji", {
+        execute: async (actionName: string, params: Record<string, unknown>) => {
+          if (actionName === "check_with_teacher") {
+            const result = await this.deps.skillRequests.create(
+              tenantId,
+              params.skill_name as string,
+              params.context as string,
+            );
+            return { submitted: true, requestId: result.id };
+          }
+          throw new Error(`Unknown babji action: ${actionName}`);
+        },
+      });
+
       // ── Build AI SDK tool definitions only for connected skills ──
       const connectedSkills = this.deps.availableSkills.filter(
         (s) => !s.requiresAuth || connectedProviders.includes(s.name)
