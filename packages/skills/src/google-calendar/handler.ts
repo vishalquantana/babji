@@ -22,6 +22,10 @@ export class GoogleCalendarHandler implements SkillHandler {
       case "update_event":
         this.requireParam(params, "event_id", actionName);
         return this.updateEvent(params);
+      case "rsvp_event":
+        this.requireParam(params, "event_id", actionName);
+        this.requireParam(params, "response", actionName);
+        return this.rsvpEvent(params);
       case "find_free_slots":
         this.requireParam(params, "time_min", actionName);
         this.requireParam(params, "time_max", actionName);
@@ -133,6 +137,58 @@ export class GoogleCalendarHandler implements SkillHandler {
       };
     } catch (err) {
       this.wrapApiError("update_event", err);
+    }
+  }
+
+  private async rsvpEvent(params: Record<string, unknown>) {
+    const calendarId = (params.calendar_id as string) || "primary";
+    const eventId = params.event_id as string;
+    const response = params.response as string;
+
+    const validResponses = ["accepted", "declined", "tentative"];
+    if (!validResponses.includes(response)) {
+      throw new Error(`Invalid response: ${response}. Must be one of: ${validResponses.join(", ")}`);
+    }
+
+    try {
+      // First, get the event to find the current user's email in attendees
+      const event = await this.calendar.events.get({ calendarId, eventId });
+
+      // Get the calendar owner's email (the authenticated user)
+      const calInfo = await this.calendar.calendars.get({ calendarId });
+      const userEmail = calInfo.data.id; // primary calendar ID is the user's email
+
+      // Update the attendee's response status
+      const attendees = event.data.attendees || [];
+      let found = false;
+      for (const attendee of attendees) {
+        if (attendee.email === userEmail || attendee.self) {
+          attendee.responseStatus = response;
+          found = true;
+          break;
+        }
+      }
+
+      if (!found) {
+        // If user is not in attendees (they're the organizer), add self
+        attendees.push({ email: userEmail!, responseStatus: response, self: true });
+      }
+
+      const res = await this.calendar.events.patch({
+        calendarId,
+        eventId,
+        requestBody: { attendees },
+        sendUpdates: "all", // notify other attendees
+      });
+
+      return {
+        updated: true,
+        eventId: res.data.id,
+        summary: res.data.summary,
+        yourResponse: response,
+      };
+    } catch (err) {
+      this.wrapApiError("rsvp_event", err);
     }
   }
 

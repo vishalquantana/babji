@@ -1,10 +1,12 @@
 import Fastify from "fastify";
 import { randomUUID } from "node:crypto";
-import { sql } from "drizzle-orm";
+import { sql, eq, and } from "drizzle-orm";
 import type { GatewayConfig } from "./config.js";
 import type { Database } from "@babji/db";
+import { schema } from "@babji/db";
 import type { MessageHandler } from "./message-handler.js";
 import type { ChannelAdapter } from "./adapters/types.js";
+import { nextUtcForLocalTime } from "./job-runner.js";
 import { logger } from "./logger.js";
 
 const startedAt = Date.now();
@@ -78,6 +80,42 @@ export function createServer({ config, db, handler, adapters }: ServerDeps) {
       displayName: provider,
       prompt: `I just connected ${provider}. Give me a quick summary of what you can see.`,
     };
+
+    // Auto-seed scheduled jobs for newly connected services
+    if (provider === "google_calendar" && db) {
+      try {
+        // Check if a daily_calendar_summary job already exists for this tenant
+        const existing = await db.query.scheduledJobs.findFirst({
+          where: and(
+            eq(schema.scheduledJobs.tenantId, tenantId),
+            eq(schema.scheduledJobs.jobType, "daily_calendar_summary"),
+          ),
+        });
+
+        if (!existing) {
+          // Look up tenant timezone
+          const tenant = await db.query.tenants.findFirst({
+            where: eq(schema.tenants.id, tenantId),
+          });
+          const timezone = tenant?.timezone || "UTC";
+          const scheduledAt = nextUtcForLocalTime("07:30", timezone);
+
+          await db.insert(schema.scheduledJobs).values({
+            tenantId,
+            jobType: "daily_calendar_summary",
+            scheduleType: "daily",
+            scheduledAt,
+            recurrenceRule: "07:30",
+            payload: {},
+            status: "active",
+          });
+
+          logger.info({ tenantId, scheduledAt: scheduledAt.toISOString() }, "Seeded daily calendar summary job");
+        }
+      } catch (err) {
+        logger.error({ err, tenantId }, "Failed to seed calendar summary job");
+      }
+    }
 
     // Fire and forget — don't block the OAuth callback
     setImmediate(async () => {

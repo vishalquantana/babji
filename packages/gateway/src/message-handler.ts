@@ -14,6 +14,9 @@ import { TenantResolver } from "./tenant-resolver.js";
 import { OnboardingHandler } from "./onboarding.js";
 import { RateLimiter } from "./rate-limiter.js";
 import { logger } from "./logger.js";
+import { timezoneFromText } from "./city-timezone.js";
+import { timezoneFromPhone } from "./phone-timezone.js";
+import { ensureValidToken } from "./token-refresh.js";
 
 /** Pattern to detect "connect <something>" commands */
 const CONNECT_PREFIX_RE = /^connect\s+(?:my\s+|to\s+(?:my\s+)?)?(.+?)\s*$/i;
@@ -100,6 +103,8 @@ export interface MessageHandlerDeps {
 
 export class MessageHandler {
   private rateLimiter: RateLimiter;
+  /** Pending phone numbers awaiting user confirmation: tenantId -> phone */
+  private pendingPhones = new Map<string, string>();
 
   constructor(private deps: MessageHandlerDeps) {
     this.rateLimiter = new RateLimiter();
@@ -140,6 +145,102 @@ export class MessageHandler {
 
       const tenantId = tenant.id;
 
+      // ── Handle phone number collection (Telegram users without phone) ──
+      if (!tenant.phone && channel === "telegram") {
+        const trimmedText = message.text.trim().toLowerCase();
+        const pendingPhone = this.pendingPhones.get(tenantId);
+
+        // Step 2: User is confirming or rejecting a pending phone number
+        if (pendingPhone) {
+          const isYes = ["yes", "y", "yeah", "yep", "correct", "ok", "okay", "sure", "right", "confirm", "👍"].includes(trimmedText);
+          const isNo = ["no", "n", "nope", "wrong", "nah", "change"].includes(trimmedText);
+
+          if (isYes) {
+            this.pendingPhones.delete(tenantId);
+            const detectedTz = timezoneFromPhone(pendingPhone);
+            const updates: Record<string, string> = { phone: pendingPhone };
+            if (detectedTz) updates.timezone = detectedTz;
+
+            await this.deps.db.update(schema.tenants)
+              .set(updates)
+              .where(eq(schema.tenants.id, tenantId));
+
+            logger.info({ tenantId, phone: pendingPhone, timezone: detectedTz }, "Saved phone number from Telegram user");
+
+            const tzNote = detectedTz
+              ? `I've set your timezone based on your number.`
+              : "";
+
+            return {
+              tenantId, channel, recipient: sender,
+              text: [
+                `Saved! ${tzNote}`,
+                "",
+                "Here's what I can help with:",
+                "- Email: read, send, block, unsubscribe",
+                "- Calendar: view, create, reschedule events",
+                "- Social media: post to Instagram, Facebook, LinkedIn, X",
+                "- Ads: manage Google Ads and Meta Ads campaigns",
+                "",
+                "To get started, just connect a service by saying something like 'connect my Gmail'.",
+                "",
+                "What would you like to do first?",
+              ].join("\n"),
+            };
+          }
+
+          if (isNo) {
+            this.pendingPhones.delete(tenantId);
+            return {
+              tenantId, channel, recipient: sender,
+              text: "No problem! Please type your phone number again with country code (e.g. +91 98765 43210), or type 'skip' to skip.",
+            };
+          }
+          // If neither yes nor no, fall through — might be a new phone number or regular message
+        }
+
+        // If user types "skip", proceed without phone
+        if (trimmedText === "skip") {
+          this.pendingPhones.delete(tenantId);
+          return {
+            tenantId, channel, recipient: sender,
+            text: [
+              "No worries! Here's what I can help with:",
+              "- Email: read, send, block, unsubscribe",
+              "- Calendar: view, create, reschedule events",
+              "- Social media: post to Instagram, Facebook, LinkedIn, X",
+              "- Ads: manage Google Ads and Meta Ads campaigns",
+              "",
+              "To get started, just connect a service by saying something like 'connect my Gmail'.",
+              "",
+              "What would you like to do first?",
+            ].join("\n"),
+          };
+        }
+
+        // Step 1: Check if the message looks like a phone number
+        const phoneDigits = message.text.replace(/[\s\-\(\)]/g, "");
+        if (/^\+?\d{7,15}$/.test(phoneDigits)) {
+          let normalizedPhone: string;
+          if (phoneDigits.startsWith("+")) {
+            normalizedPhone = phoneDigits;
+          } else if (phoneDigits.length === 10) {
+            normalizedPhone = `+91${phoneDigits}`;
+          } else {
+            normalizedPhone = `+${phoneDigits}`;
+          }
+
+          // Store pending and ask for confirmation
+          this.pendingPhones.set(tenantId, normalizedPhone);
+
+          return {
+            tenantId, channel, recipient: sender,
+            text: `I have your number as ${normalizedPhone} — is that correct? (yes/no)`,
+          };
+        }
+        // If it doesn't look like a phone number or "skip", fall through to the Brain
+      }
+
       // ── Handle "connect <provider>" command ──
       const connectMatch = message.text.trim().match(CONNECT_PREFIX_RE);
       if (connectMatch) {
@@ -171,32 +272,64 @@ export class MessageHandler {
       });
       const connectedProviders = connections.map((c) => c.provider);
 
-      // ── Create per-request ToolExecutor with tenant's tokens ──
+      // ── Create per-request ToolExecutor with tenant's tokens (auto-refresh) ──
       const toolExecutor = new ToolExecutor();
-      for (const conn of connections) {
-        const tokenData = await this.deps.vault.retrieve(tenantId, conn.provider) as {
-          access_token: string;
-          refresh_token?: string;
-        } | null;
+      const expiredProviders: string[] = [];
 
-        if (!tokenData?.access_token) {
-          logger.warn({ tenantId, provider: conn.provider }, "No access token found for connection");
+      for (const conn of connections) {
+        const tokenResult = await ensureValidToken(tenantId, conn.provider, this.deps.vault, this.deps.db);
+
+        if (!tokenResult) {
+          logger.warn({ tenantId, provider: conn.provider }, "No token found for connection");
           continue;
         }
 
+        if (tokenResult.status === "expired") {
+          expiredProviders.push(conn.provider);
+          logger.warn({ tenantId, provider: conn.provider }, "Token expired and refresh failed");
+          continue;
+        }
+
+        const accessToken = tokenResult.accessToken;
+
         if (conn.provider === "gmail") {
-          toolExecutor.registerSkill("gmail", new GmailHandler(tokenData.access_token));
+          toolExecutor.registerSkill("gmail", new GmailHandler(accessToken));
         }
         if (conn.provider === "google_calendar") {
-          toolExecutor.registerSkill("google_calendar", new GoogleCalendarHandler(tokenData.access_token));
+          toolExecutor.registerSkill("google_calendar", new GoogleCalendarHandler(accessToken));
         }
         if (conn.provider === "google_ads") {
-          const developerToken = (tokenData as Record<string, string>).developer_token;
-          toolExecutor.registerSkill("google_ads", new GoogleAdsHandler(tokenData.access_token, developerToken));
+          const fullToken = await this.deps.vault.retrieve(tenantId, conn.provider) as Record<string, string> | null;
+          const developerToken = fullToken?.developer_token;
+          toolExecutor.registerSkill("google_ads", new GoogleAdsHandler(accessToken, developerToken));
         }
         if (conn.provider === "google_analytics") {
-          toolExecutor.registerSkill("google_analytics", new GoogleAnalyticsHandler(tokenData.access_token));
+          toolExecutor.registerSkill("google_analytics", new GoogleAnalyticsHandler(accessToken));
         }
+      }
+
+      // If any tokens are expired, tell the user before proceeding
+      if (expiredProviders.length > 0) {
+        const providerNames = expiredProviders.map((p) => p.replace(/_/g, " ")).join(", ");
+        const reconnectCmds = expiredProviders.map((p) => `"connect ${p.replace("google_", "")}"`).join(" or ");
+
+        // Remove expired providers from connected list so the Brain doesn't try to use them
+        const validProviders = connectedProviders.filter((p) => !expiredProviders.includes(p));
+
+        // If ALL providers are expired and the user's message likely needs them, warn immediately
+        if (validProviders.length === 0 && connections.length > 0) {
+          return {
+            tenantId,
+            channel,
+            recipient: sender,
+            text: `Your ${providerNames} connection has expired. Please reconnect by typing ${reconnectCmds} so I can help you.`,
+          };
+        }
+
+        // Some expired — prepend a warning to the response later
+        // Update connectedProviders to only include valid ones
+        connectedProviders.length = 0;
+        connectedProviders.push(...validProviders);
       }
 
       // ── Build AI SDK tool definitions only for connected skills ──
@@ -258,6 +391,7 @@ export class MessageHandler {
       );
 
       // Fire-and-forget memory extraction — don't block the response
+      const currentTz = tenant.timezone ?? "UTC";
       setImmediate(async () => {
         try {
           const extractor = new MemoryExtractor(this.deps.llmLite);
@@ -273,6 +407,20 @@ export class MessageHandler {
               await this.deps.memory.appendMemory(tenantId, fact);
             }
             logger.info({ tenantId, facts: facts.length }, "Extracted new memories");
+
+            // If timezone is still UTC, try to detect from extracted location facts
+            if (currentTz === "UTC") {
+              for (const fact of facts) {
+                const detectedTz = timezoneFromText(fact);
+                if (detectedTz) {
+                  await this.deps.db.update(schema.tenants)
+                    .set({ timezone: detectedTz })
+                    .where(eq(schema.tenants.id, tenantId));
+                  logger.info({ tenantId, timezone: detectedTz, fact }, "Auto-detected timezone from conversation");
+                  break;
+                }
+              }
+            }
           }
         } catch (err) {
           logger.error({ err, tenantId }, "Memory extraction failed");

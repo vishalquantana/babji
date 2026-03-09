@@ -110,6 +110,35 @@ export const shortLinks = pgTable("short_links", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const jobStatusEnum = pgEnum("job_status", [
+  "active",
+  "paused",
+  "completed",
+  "failed",
+]);
+
+export const scheduledJobs = pgTable(
+  "scheduled_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    jobType: varchar("job_type", { length: 50 }).notNull(), // e.g. "daily_calendar_summary", "reminder"
+    scheduleType: varchar("schedule_type", { length: 20 }).notNull(), // "once" | "daily" | "cron"
+    scheduledAt: timestamp("scheduled_at").notNull(), // next run time (UTC)
+    recurrenceRule: varchar("recurrence_rule", { length: 50 }), // for daily: "07:30" (local time), for cron: cron expr
+    payload: jsonb("payload").$type<Record<string, unknown>>().default({}),
+    status: jobStatusEnum("status").notNull().default("active"),
+    lastRunAt: timestamp("last_run_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_jobs_due").on(table.status, table.scheduledAt),
+    index("idx_jobs_tenant").on(table.tenantId),
+  ]
+);
+
 export const auditLog = pgTable(
   "audit_log",
   {

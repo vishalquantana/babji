@@ -4,7 +4,14 @@ import { schema } from "@babji/db";
 import type { SkillRequest } from "@babji/types";
 
 export class SkillRequestManager {
+  private onCreatedCallback: ((tenantId: string, skillName: string, context: string) => void) | null = null;
+
   constructor(private db: Database) {}
+
+  /** Register a callback that fires after a skill request is created (fire-and-forget). */
+  onCreated(cb: (tenantId: string, skillName: string, context: string) => void): void {
+    this.onCreatedCallback = cb;
+  }
 
   async create(
     tenantId: string,
@@ -15,6 +22,15 @@ export class SkillRequestManager {
       .insert(schema.skillRequests)
       .values({ tenantId, skillName, context })
       .returning({ id: schema.skillRequests.id });
+
+    if (this.onCreatedCallback) {
+      try {
+        this.onCreatedCallback(tenantId, skillName, context);
+      } catch {
+        // fire-and-forget — don't let notification failure affect the request
+      }
+    }
+
     return { id: row.id };
   }
 

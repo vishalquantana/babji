@@ -1,6 +1,7 @@
 import { loadConfig, validateConfig } from "./config.js";
 import { createServer } from "./server.js";
-import { createDb } from "@babji/db";
+import { createDb, schema } from "@babji/db";
+import { eq } from "drizzle-orm";
 import { MemoryManager, SessionStore } from "@babji/memory";
 import { CreditLedger } from "@babji/credits";
 import { TokenVault } from "@babji/crypto";
@@ -12,6 +13,8 @@ import { MessageHandler } from "./message-handler.js";
 import { TelegramAdapter } from "./adapters/telegram.js";
 import { WhatsAppAdapter } from "./adapters/whatsapp.js";
 import type { ChannelAdapter } from "./adapters/types.js";
+import { JobRunner } from "./job-runner.js";
+import { AdminNotifier } from "./admin-notifier.js";
 import { logger } from "./logger.js";
 
 async function main() {
@@ -48,6 +51,22 @@ async function main() {
 
   // Skill request manager for "check with my teacher" flow
   const skillRequests = new SkillRequestManager(db);
+
+  // Admin notifier for skill requests
+  if (config.adminBot.enabled) {
+    const adminNotifier = new AdminNotifier(config.adminBot.botToken, config.adminBot.chatId);
+    skillRequests.onCreated(async (tenantId, skillName, context) => {
+      const tenant = await db.query.tenants.findFirst({
+        where: eq(schema.tenants.id, tenantId),
+      });
+      await adminNotifier.notifySkillRequest(
+        tenant?.name || tenantId,
+        skillName,
+        context,
+      );
+    });
+    logger.info("Admin bot notifications enabled");
+  }
 
   // Load skill definitions
   const availableSkills = loadSkillDefinitions();
@@ -97,6 +116,10 @@ async function main() {
     logger.warn("No channel adapters enabled. Set TELEGRAM_BOT_TOKEN or WHATSAPP_ENABLED=true.");
   }
 
+  // Start the scheduled job runner
+  const jobRunner = new JobRunner({ db, vault, adapters });
+  jobRunner.start();
+
   // Create and start HTTP server
   const server = createServer({ config, db, handler, adapters });
   await server.listen({ port: config.port, host: "0.0.0.0" });
@@ -105,6 +128,7 @@ async function main() {
   // Graceful shutdown
   const shutdown = async () => {
     logger.info("Shutting down...");
+    jobRunner.stop();
     for (const adapter of adapters) {
       await adapter.stop();
     }

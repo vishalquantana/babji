@@ -14,6 +14,11 @@ export interface GatewayConfig {
     enabled: boolean;
     botToken: string;
   };
+  adminBot: {
+    enabled: boolean;
+    botToken: string;
+    chatId: string;
+  };
 }
 
 export function loadConfig(): GatewayConfig {
@@ -34,6 +39,11 @@ export function loadConfig(): GatewayConfig {
     telegram: {
       enabled: !!process.env.TELEGRAM_BOT_TOKEN,
       botToken: process.env.TELEGRAM_BOT_TOKEN || "",
+    },
+    adminBot: {
+      enabled: !!process.env.ADMIN_BOT_TOKEN && !!process.env.ADMIN_TELEGRAM_ID,
+      botToken: process.env.ADMIN_BOT_TOKEN || "",
+      chatId: process.env.ADMIN_TELEGRAM_ID || "",
     },
   };
 }

@@ -69,6 +69,14 @@ export class PromptBuilder {
       }
     }
 
+    parts.push("");
+    parts.push("## Formatting rules (STRICT)");
+    parts.push("You are replying in a chat app (Telegram/WhatsApp). These rules are MANDATORY:");
+    parts.push("- NEVER use emojis. Not a single one. No emoji whatsoever.");
+    parts.push("- NEVER use markdown: no **bold**, no *italic*, no [links](url), no # headers.");
+    parts.push("- Use plain text only. Use line breaks and dashes for structure.");
+    parts.push("- Keep responses concise and professional.");
+
     return parts.join("\n");
   }
 }

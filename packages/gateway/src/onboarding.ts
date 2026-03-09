@@ -63,7 +63,7 @@ export class OnboardingHandler {
         this.deps.credits.initializeForTenant(tenantId),
       ]);
 
-      return this.reply(message, this.onboardedMessage(name));
+      return this.reply(message, this.onboardedMessage(name, channel));
     }
 
     // Could not understand the input — ask again
@@ -98,22 +98,37 @@ export class OnboardingHandler {
     ].join("\n");
   }
 
-  private onboardedMessage(name: string): string {
-    return [
+  private onboardedMessage(name: string, channel: string): string {
+    const lines = [
       `Nice to meet you, ${name}!`,
       "",
       "You're all set up with 5 free daily credits (I call them 'juice').",
-      "",
-      "Here's what I can help with:",
-      "- Email: read, send, block, unsubscribe",
-      "- Calendar: view, create, reschedule events",
-      "- Social media: post to Instagram, Facebook, LinkedIn, X",
-      "- Ads: manage Google Ads and Meta Ads campaigns",
-      "",
-      "To get started, just connect a service by saying something like 'connect my Gmail'.",
-      "",
-      "What would you like to do first?",
-    ].join("\n");
+    ];
+
+    // Ask for phone number if this is a Telegram user (we don't have their phone)
+    if (channel === "telegram") {
+      lines.push(
+        "",
+        "One quick thing — could you share your phone number with country code? (e.g. +91 98765 43210)",
+        "This helps me get your timezone right and link your account if you ever use WhatsApp too.",
+        "You can also type 'skip' to skip this step.",
+      );
+    } else {
+      lines.push(
+        "",
+        "Here's what I can help with:",
+        "- Email: read, send, block, unsubscribe",
+        "- Calendar: view, create, reschedule events",
+        "- Social media: post to Instagram, Facebook, LinkedIn, X",
+        "- Ads: manage Google Ads and Meta Ads campaigns",
+        "",
+        "To get started, just connect a service by saying something like 'connect my Gmail'.",
+        "",
+        "What would you like to do first?",
+      );
+    }
+
+    return lines.join("\n");
   }
 
   private reply(original: BabjiMessage, text: string): OutboundMessage {
