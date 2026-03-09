@@ -98,6 +98,7 @@ export const skillRequests = pgTable(
     assignedTo: varchar("assigned_to", { length: 100 }),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     resolvedAt: timestamp("resolved_at"),
+    notifiedAt: timestamp("notified_at"),
   },
   (table) => [
     index("idx_skill_requests_status").on(table.status),
@@ -109,6 +110,32 @@ export const shortLinks = pgTable("short_links", {
   url: text("url").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+export const todoPriorityEnum = pgEnum("todo_priority", ["low", "medium", "high"]);
+export const todoStatusEnum = pgEnum("todo_status", ["pending", "done"]);
+
+export const todos = pgTable(
+  "todos",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    title: text("title").notNull(),
+    notes: text("notes"),
+    dueDate: varchar("due_date", { length: 10 }), // "2026-04-15" ISO date string
+    reminderAt: timestamp("reminder_at"),
+    reminderJobId: uuid("reminder_job_id"),
+    priority: todoPriorityEnum("priority").notNull().default("medium"),
+    status: todoStatusEnum("status").notNull().default("pending"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    completedAt: timestamp("completed_at"),
+  },
+  (table) => [
+    index("idx_todos_tenant").on(table.tenantId),
+    index("idx_todos_status").on(table.tenantId, table.status),
+  ]
+);
 
 export const jobStatusEnum = pgEnum("job_status", [
   "active",
