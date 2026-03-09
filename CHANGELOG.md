@@ -6,6 +6,11 @@ All notable changes to Babji are documented here. Each entry notes whether the c
 
 ## 2026-03-09
 
+### Meeting attendee briefing (BAB-5) [DEPLOYED]
+- **What:** Pre-meeting attendee research and briefing. When the daily calendar summary runs, detects external attendees (different email domain). If briefings enabled, researches them via Scrapin.io + DataForSEO (LinkedIn profiles) and sends a rich dossier. Two timing modes: "morning" (with calendar summary) or "pre_meeting" (1 hour before each meeting). On-demand via "brief me on my 2 PM meeting". Organic discovery -- suggests the feature when external attendees detected. Results cached 7 days per tenant. Also: proactive OAuth connect link generation (no more "would you like me to connect?").
+- **Files:** `packages/db/src/schema.ts`, `packages/skills/src/registry.ts`, `packages/gateway/src/meeting-briefing.ts` (new), `packages/gateway/src/job-runner.ts`, `packages/gateway/src/message-handler.ts`, `packages/gateway/src/index.ts`, `packages/agent/src/prompt-builder.ts`
+- **DB migration:** `ALTER TABLE tenants ADD COLUMN email_domain VARCHAR(100); ALTER TABLE tenants ADD COLUMN meeting_briefing_pref VARCHAR(20);`
+
 ### Recurring reminders (BAB-4) [DEPLOYED]
 - **What:** Added recurring reminders. Users can say "remind me every day at 9:20 AM to check orders" and the system creates a repeating scheduled job. Supports daily, weekdays (Mon-Fri), weekly, monthly, and yearly recurrence. JobRunner reschedules instead of completing for recurring jobs. list_tasks shows recurrence info. PromptBuilder guides Brain on when to use recurring vs single reminders. No schema changes -- uses existing scheduledJobs infrastructure.
 - **Files:** `packages/skills/src/registry.ts`, `packages/skills/src/todos/handler.ts`, `packages/gateway/src/job-runner.ts`, `packages/agent/src/prompt-builder.ts`
