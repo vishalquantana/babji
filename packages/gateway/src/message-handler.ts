@@ -589,11 +589,26 @@ export class MessageHandler {
         }
       });
 
+      // ── Complete onboarding after first Brain interaction ──
+      let responseText = result.content;
+      if (tenant.onboardingPhase === "ready") {
+        await this.deps.db.update(schema.tenants)
+          .set({ onboardingPhase: "done" })
+          .where(eq(schema.tenants.id, tenantId));
+
+        responseText += [
+          "",
+          "",
+          "By the way -- I can also help manage your emails, calendar, and even ads if you use Google.",
+          "Want me to connect to any of these? Just say the word.",
+        ].join("\n");
+      }
+
       return {
         tenantId,
         channel,
         recipient: sender,
-        text: result.content,
+        text: responseText,
       };
     } catch (err) {
       logger.error({ err, sender, channel }, "Error handling message");
