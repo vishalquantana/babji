@@ -6,7 +6,7 @@ import type { LlmClient } from "@babji/agent";
 import { MemoryManager, SessionStore } from "@babji/memory";
 import { CreditLedger } from "@babji/credits";
 import { TokenVault } from "@babji/crypto";
-import { GmailHandler, GoogleCalendarHandler, GoogleAdsHandler, GoogleAnalyticsHandler, PeopleHandler } from "@babji/skills";
+import { GmailHandler, GoogleCalendarHandler, GoogleAdsHandler, GoogleAnalyticsHandler, PeopleHandler, TodosHandler, GeneralResearchHandler } from "@babji/skills";
 import type { SkillRequestManager } from "@babji/skills";
 import type { Database } from "@babji/db";
 import { schema } from "@babji/db";
@@ -106,12 +106,16 @@ export interface MessageHandlerDeps {
     dataforseoLogin: string;
     dataforseoPassword: string;
   };
+  googleApiKey: string;
+  googleModel: string;
 }
 
 export class MessageHandler {
   private rateLimiter: RateLimiter;
   /** Pending phone numbers awaiting user confirmation: tenantId -> phone */
   private pendingPhones = new Map<string, string>();
+  /** Tenants who have been asked for their phone number (prevents intercepting unrelated numbers) */
+  private askedForPhone = new Set<string>();
 
   constructor(private deps: MessageHandlerDeps) {
     this.rateLimiter = new RateLimiter();
@@ -147,7 +151,13 @@ export class MessageHandler {
       // New user — run onboarding
       if (!tenant) {
         logger.info({ sender, channel }, "New sender — routing to onboarding");
-        return this.deps.onboarding.handle(message);
+        const result = await this.deps.onboarding.handle(message);
+        // If onboarding just created a Telegram user, it asked for their phone number.
+        // Flag this so we know to intercept the next numeric message as a phone number.
+        if (channel === "telegram" && result.tenantId !== "onboarding") {
+          this.askedForPhone.add(result.tenantId);
+        }
+        return result;
       }
 
       const tenantId = tenant.id;
@@ -164,6 +174,7 @@ export class MessageHandler {
 
           if (isYes) {
             this.pendingPhones.delete(tenantId);
+            this.askedForPhone.delete(tenantId);
             const detectedTz = timezoneFromPhone(pendingPhone);
             const updates: Record<string, string> = { phone: pendingPhone };
             if (detectedTz) updates.timezone = detectedTz;
@@ -209,6 +220,7 @@ export class MessageHandler {
         // If user types "skip", proceed without phone
         if (trimmedText === "skip") {
           this.pendingPhones.delete(tenantId);
+          this.askedForPhone.delete(tenantId);
           return {
             tenantId, channel, recipient: sender,
             text: [
@@ -225,9 +237,9 @@ export class MessageHandler {
           };
         }
 
-        // Step 1: Check if the message looks like a phone number
+        // Step 1: Check if the message looks like a phone number — but ONLY if we recently asked for one
         const phoneDigits = message.text.replace(/[\s\-\(\)]/g, "");
-        if (/^\+?\d{7,15}$/.test(phoneDigits)) {
+        if (this.askedForPhone.has(tenantId) && /^\+?\d{7,15}$/.test(phoneDigits)) {
           let normalizedPhone: string;
           if (phoneDigits.startsWith("+")) {
             normalizedPhone = phoneDigits;
@@ -245,7 +257,9 @@ export class MessageHandler {
             text: `I have your number as ${normalizedPhone} — is that correct? (yes/no)`,
           };
         }
-        // If it doesn't look like a phone number or "skip", fall through to the Brain
+        // User sent something that isn't a phone number and isn't "skip" — they're moving on.
+        // Clear the phone-ask flag so future numbers aren't intercepted.
+        this.askedForPhone.delete(tenantId);
       }
 
       // ── Handle "connect <provider>" command ──
@@ -306,7 +320,11 @@ export class MessageHandler {
           toolExecutor.registerSkill("google_calendar", new GoogleCalendarHandler(accessToken));
         }
         if (conn.provider === "google_ads") {
-          toolExecutor.registerSkill("google_ads", new GoogleAdsHandler(accessToken, this.deps.googleAdsDeveloperToken));
+          toolExecutor.registerSkill("google_ads", new GoogleAdsHandler(accessToken, this.deps.googleAdsDeveloperToken, (issue, context) => {
+            this.deps.skillRequests.create(tenantId, `google_ads:${issue}`, context).catch((err) => {
+              logger.error({ err, issue }, "Failed to report Google Ads issue");
+            });
+          }));
         }
         if (conn.provider === "google_analytics") {
           toolExecutor.registerSkill("google_analytics", new GoogleAnalyticsHandler(accessToken));
@@ -337,7 +355,9 @@ export class MessageHandler {
         connectedProviders.push(...validProviders);
       }
 
-      // ── Register "check with my teacher" handler (always available) ──
+      // ── Register "babji" skill handler (check_with_teacher, connect_service, task actions) ──
+      const todosHandler = new TodosHandler(this.deps.db, tenantId, tenant.timezone ?? "UTC");
+
       toolExecutor.registerSkill("babji", {
         execute: async (actionName: string, params: Record<string, unknown>) => {
           if (actionName === "check_with_teacher") {
@@ -348,6 +368,20 @@ export class MessageHandler {
             );
             return { submitted: true, requestId: result.id };
           }
+          if (actionName === "connect_service") {
+            const raw = (params.service_name as string || "").toLowerCase().trim();
+            const provider = matchProvider(raw);
+            if (!provider) {
+              return { success: false, error: `Unknown service "${raw}". Available: gmail, google_calendar, google_ads, google_analytics` };
+            }
+            const link = await this.generateConnectLink(tenantId, provider, channel, sender);
+            return link;
+          }
+          // Task actions: add_task, list_tasks, complete_task, update_task, delete_task
+          const taskActions = ["add_task", "list_tasks", "complete_task", "update_task", "delete_task"];
+          if (taskActions.includes(actionName)) {
+            return todosHandler.execute(actionName, params);
+          }
           throw new Error(`Unknown babji action: ${actionName}`);
         },
       });
@@ -357,6 +391,27 @@ export class MessageHandler {
         toolExecutor.registerSkill("people", new PeopleHandler(
           { login: this.deps.peopleConfig.dataforseoLogin, password: this.deps.peopleConfig.dataforseoPassword },
           { apiKey: this.deps.peopleConfig.scrapinApiKey },
+        ));
+      }
+
+      // ── Register general research handler (server-side keys, always available) ──
+      if (this.deps.googleApiKey) {
+        const insertJob = async (jobTenantId: string, payload: Record<string, unknown>) => {
+          const [job] = await this.deps.db.insert(schema.scheduledJobs).values({
+            tenantId: jobTenantId,
+            jobType: "deep_research",
+            scheduleType: "once",
+            scheduledAt: new Date(),
+            payload,
+            status: "active",
+          }).returning();
+          return job.id;
+        };
+
+        toolExecutor.registerSkill("general_research", new GeneralResearchHandler(
+          this.deps.googleApiKey,
+          this.deps.googleModel || "gemini-3-flash-preview",
+          { insertJob, tenantId, channel },
         ));
       }
 
@@ -472,67 +527,60 @@ export class MessageHandler {
     }
   }
 
+  private static readonly PROVIDER_CONFIGS: Record<string, {
+    displayName: string;
+    scopes: string[];
+    authUrl: string;
+  }> = {
+    gmail: {
+      displayName: "Gmail",
+      scopes: [
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.modify",
+      ],
+      authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+    },
+    google_calendar: {
+      displayName: "Google Calendar",
+      scopes: [
+        "https://www.googleapis.com/auth/calendar",
+        "https://www.googleapis.com/auth/calendar.events",
+      ],
+      authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+    },
+    google_ads: {
+      displayName: "Google Ads",
+      scopes: [
+        "https://www.googleapis.com/auth/adwords",
+      ],
+      authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+    },
+    google_analytics: {
+      displayName: "Google Analytics",
+      scopes: [
+        "https://www.googleapis.com/auth/analytics.readonly",
+        "https://www.googleapis.com/auth/analytics.manage.users.readonly",
+      ],
+      authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+    },
+  };
+
   /**
-   * Generate an OAuth authorization URL and send it as a clickable link.
+   * Generate an OAuth short link for a provider.
+   * Used by both the "connect <provider>" command and the connect_service tool.
    */
-  private async handleConnect(
+  private async generateConnectLink(
     tenantId: string,
     provider: string,
     channel: string,
     sender: string,
-  ): Promise<OutboundMessage> {
-    // For now, only Google providers use this flow
-    const providerConfigs: Record<string, {
-      displayName: string;
-      scopes: string[];
-      authUrl: string;
-    }> = {
-      gmail: {
-        displayName: "Gmail",
-        scopes: [
-          "https://www.googleapis.com/auth/gmail.readonly",
-          "https://www.googleapis.com/auth/gmail.modify",
-        ],
-        authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
-      },
-      google_calendar: {
-        displayName: "Google Calendar",
-        scopes: [
-          "https://www.googleapis.com/auth/calendar",
-          "https://www.googleapis.com/auth/calendar.events",
-        ],
-        authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
-      },
-      google_ads: {
-        displayName: "Google Ads",
-        scopes: [
-          "https://www.googleapis.com/auth/adwords",
-        ],
-        authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
-      },
-      google_analytics: {
-        displayName: "Google Analytics",
-        scopes: [
-          "https://www.googleapis.com/auth/analytics.readonly",
-          "https://www.googleapis.com/auth/analytics.manage.users.readonly",
-        ],
-        authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
-      },
-    };
-
-    const config = providerConfigs[provider];
+  ): Promise<{ success: boolean; shortUrl?: string; fullUrl?: string; displayName: string; error?: string }> {
+    const config = MessageHandler.PROVIDER_CONFIGS[provider];
     if (!config) {
-      return {
-        tenantId,
-        channel: channel as "telegram" | "whatsapp" | "app",
-        recipient: sender,
-        text: `Connection for "${provider}" is not yet supported. Available: gmail, calendar.`,
-      };
+      return { success: false, displayName: provider, error: `Connection for "${provider}" is not yet supported.` };
     }
 
-    // State parameter encodes tenantId, provider, channel, and sender for the callback
     const state = Buffer.from(JSON.stringify({ tenantId, provider, channel, sender })).toString("base64url");
-
     const redirectUri = `${this.deps.oauthPortalUrl}/api/callback/${provider}`;
     const params = new URLSearchParams({
       client_id: this.deps.googleClientId,
@@ -546,8 +594,7 @@ export class MessageHandler {
 
     const fullUrl = `${config.authUrl}?${params.toString()}`;
 
-    // Store a short link so we send a clean URL instead of the full OAuth URL
-    const shortId = randomBytes(6).toString("base64url"); // ~8 chars
+    const shortId = randomBytes(6).toString("base64url");
     try {
       await this.deps.db.insert(schema.shortLinks).values({
         id: shortId,
@@ -555,21 +602,39 @@ export class MessageHandler {
       });
     } catch (err) {
       logger.error({ err }, "Failed to create short link, falling back to full URL");
+      return { success: true, fullUrl, displayName: config.displayName };
+    }
+
+    const shortUrl = `${this.deps.oauthPortalUrl}/link/${shortId}`;
+    return { success: true, shortUrl, displayName: config.displayName };
+  }
+
+  /**
+   * Generate an OAuth authorization URL and send it as a clickable link.
+   */
+  private async handleConnect(
+    tenantId: string,
+    provider: string,
+    channel: string,
+    sender: string,
+  ): Promise<OutboundMessage> {
+    const link = await this.generateConnectLink(tenantId, provider, channel, sender);
+    const url = link.shortUrl || link.fullUrl;
+
+    if (!link.success || !url) {
       return {
         tenantId,
         channel: channel as "telegram" | "whatsapp" | "app",
         recipient: sender,
-        text: `Click the link below to connect your ${config.displayName}:\n\n${fullUrl}`,
+        text: link.error || `Connection for "${provider}" is not yet supported.`,
       };
     }
-
-    const shortUrl = `${this.deps.oauthPortalUrl}/link/${shortId}`;
 
     return {
       tenantId,
       channel: channel as "telegram" | "whatsapp" | "app",
       recipient: sender,
-      text: `Click the link below to connect your ${config.displayName}:\n\n${shortUrl}`,
+      text: `Click the link below to connect your ${link.displayName}:\n\n${url}`,
     };
   }
 }

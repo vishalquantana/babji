@@ -9,5 +9,8 @@ export { FacebookPagesHandler } from "./facebook-pages/index.js";
 export { LinkedInHandler } from "./linkedin/index.js";
 export { XHandler } from "./x/index.js";
 export { PeopleHandler } from "./people/index.js";
+export { TodosHandler } from "./todos/index.js";
+export { GeneralResearchHandler } from "./general-research/index.js";
+export type { DeepResearchDeps } from "./general-research/index.js";
 export { SkillRequestManager } from "./skill-request-manager.js";
 export { loadSkillDefinitions } from "./registry.js";

@@ -95,6 +95,8 @@ async function main() {
     googleClientId: process.env.GOOGLE_CLIENT_ID || "",
     googleAdsDeveloperToken: config.googleAdsDeveloperToken,
     peopleConfig: config.people,
+    googleApiKey: config.googleApiKey,
+    googleModel: process.env.GOOGLE_MODEL || "gemini-3-flash-preview",
   });
 
   // Start channel adapters
