@@ -6,6 +6,11 @@ All notable changes to Babji are documented here. Each entry notes whether the c
 
 ## 2026-03-09
 
+### First-time user experience revamp [DEPLOYED]
+- **What:** Redesigned onboarding flow for zero-digital-savvy users. New flow: name -> "what do you do?" -> tailored demo suggestions -> first Brain interaction -> gentle service introduction. Phone number deferred to when timezone matters. Credits explained on first use, not upfront. Industry-specific suggestions (9 industries + default) based on user's stated role. Cleaned up SOUL.md template to remove premature credits/juice references.
+- **Files:** `packages/gateway/src/onboarding.ts`, `packages/gateway/src/message-handler.ts`, `packages/agent/src/prompt-builder.ts`, `packages/memory/src/memory-manager.ts`, `packages/db/src/schema.ts`
+- **DB migration:** `ALTER TABLE tenants ADD COLUMN onboarding_phase VARCHAR(20) NOT NULL DEFAULT 'done'`
+
 ### Admin tenant detail dashboard with conversation logs [DEPLOYED]
 - **What:** Clickable tenant names in admin dashboard open a detail page showing: overview stats, connected services, skill requests (with Complete & Notify), scheduled jobs, todos, activity log, credit transactions, and full conversation history. Conversations are loaded from JSONL session files on disk via a new gateway API endpoint.
 - **Files:** `apps/oauth-portal/src/app/admin/dashboard/tenant/[tenantId]/page.tsx` (new), `apps/oauth-portal/src/app/admin/dashboard/tenant/[tenantId]/client.tsx` (new), `apps/oauth-portal/src/app/api/admin/tenant/[tenantId]/route.ts` (new), `apps/oauth-portal/src/app/admin/dashboard/client.tsx` (clickable names), `packages/gateway/src/server.ts` (sessions endpoint)
