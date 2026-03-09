@@ -42,19 +42,33 @@ export class PeopleHandler implements SkillHandler {
 
   private async researchPerson(name: string, companyOrDomain: string) {
     // Step 1: Search Google via DataForSEO for LinkedIn URL
-    const linkedInUrl = await this.searchLinkedIn(name, companyOrDomain);
+    let linkedInUrl: string | null;
+    try {
+      linkedInUrl = await this.searchLinkedIn(name, companyOrDomain);
+    } catch (err) {
+      return { found: false, error: true, message: `Search API error: ${(err as Error).message}. Tell the user there was a technical issue and use babji__check_with_teacher to report it.` };
+    }
+
     if (!linkedInUrl) {
-      return { found: false, message: `Could not find a LinkedIn profile for "${name}" at "${companyOrDomain}".` };
+      return { found: false, message: `Google search for "site:linkedin.com/in ${name} ${companyOrDomain}" returned no LinkedIn profile URLs. Tell the user exactly this -- do not speculate about reasons.` };
     }
 
     // Step 2: Enrich via Scrapin.io
-    const profile = await this.enrichProfile(linkedInUrl);
-    return { found: true, ...profile };
+    try {
+      const profile = await this.enrichProfile(linkedInUrl);
+      return { found: true, ...profile };
+    } catch (err) {
+      return { found: false, error: true, linkedInUrl, message: `Found LinkedIn URL ${linkedInUrl} but enrichment failed: ${(err as Error).message}. Tell the user the LinkedIn was found but profile details could not be loaded, and use babji__check_with_teacher to report the error.` };
+    }
   }
 
   private async lookupProfile(linkedInUrl: string) {
-    const profile = await this.enrichProfile(linkedInUrl);
-    return { found: true, ...profile };
+    try {
+      const profile = await this.enrichProfile(linkedInUrl);
+      return { found: true, ...profile };
+    } catch (err) {
+      return { found: false, error: true, linkedInUrl, message: `Profile enrichment failed: ${(err as Error).message}. Tell the user exactly this error -- do not speculate.` };
+    }
   }
 
   private async findEmail(firstName: string, lastName: string, companyName: string) {
@@ -141,13 +155,20 @@ export class PeopleHandler implements SkillHandler {
 
     const data = await res.json() as {
       tasks?: Array<{
+        status_code?: number;
+        status_message?: string;
         result?: Array<{
           items?: Array<{ type: string; url: string }>;
         }>;
       }>;
     };
 
-    const items = data.tasks?.[0]?.result?.[0]?.items || [];
+    const task = data.tasks?.[0];
+    if (task?.status_code && task.status_code !== 20000) {
+      throw new Error(`DataForSEO API error (${task.status_code}): ${task.status_message}`);
+    }
+
+    const items = task?.result?.[0]?.items || [];
     for (const item of items) {
       if (item.type === "organic" && item.url.includes("linkedin.com/in/")) {
         return item.url;
