@@ -6,6 +6,11 @@ All notable changes to Babji are documented here. Each entry notes whether the c
 
 ## 2026-03-09
 
+### Profile verification & correction workflow [DEPLOYED]
+- **What:** Global profile directory (DB table) replaces per-tenant disk cache for meeting attendee profiles. Evening scanner job (`profile_scan`) researches tomorrow's external attendees at 6 PM and notifies admin of new profiles via Telegram. Admin dashboard "Profile Directory" section shows all profiles with verify/edit/rescrape actions. Admin can paste correct LinkedIn URL and trigger re-scrape. Corrections are global -- benefit all tenants. Profiles cached 7 days (pending) or 30 days (verified/corrected) before re-scrape.
+- **Files:** `packages/db/src/schema.ts`, `packages/gateway/src/meeting-briefing.ts`, `packages/gateway/src/job-runner.ts`, `packages/gateway/src/admin-notifier.ts`, `packages/gateway/src/index.ts`, `apps/oauth-portal/src/app/api/admin/profiles/` (new), `apps/oauth-portal/src/app/api/admin/data/route.ts`, `apps/oauth-portal/src/app/admin/dashboard/client.tsx`
+- **DB migration:** `CREATE TABLE profile_directory (...)` with `profile_status` enum
+
 ### Meeting attendee briefing (BAB-5) [DEPLOYED]
 - **What:** Pre-meeting attendee research and briefing. When the daily calendar summary runs, detects external attendees (different email domain). If briefings enabled, researches them via Scrapin.io + DataForSEO (LinkedIn profiles) and sends a rich dossier. Two timing modes: "morning" (with calendar summary) or "pre_meeting" (1 hour before each meeting). On-demand via "brief me on my 2 PM meeting". Organic discovery -- suggests the feature when external attendees detected. Results cached 7 days per tenant. Also: proactive OAuth connect link generation (no more "would you like me to connect?").
 - **Files:** `packages/db/src/schema.ts`, `packages/skills/src/registry.ts`, `packages/gateway/src/meeting-briefing.ts` (new), `packages/gateway/src/job-runner.ts`, `packages/gateway/src/message-handler.ts`, `packages/gateway/src/index.ts`, `packages/agent/src/prompt-builder.ts`
