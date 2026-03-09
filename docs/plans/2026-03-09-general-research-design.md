@@ -170,6 +170,12 @@ case "deep_research":
 - `GOOGLE_API_KEY` — for both Gemini generateContent and Interactions API
 - `GOOGLE_MODEL` — for quick_research model selection
 
+## Report Storage & Email Delivery
+
+**Full report saved to disk:** When deep research completes, the full report is saved as a markdown file at `/opt/babji/data/reports/<tenantId>/<timestamp>-<slug>.md`. This preserves the original untruncated report for later access.
+
+**Email follow-up:** After delivering the Brain-summarized report via Telegram, Babji asks: "Would you like me to email you the full report?" If the user says yes and provides an email, the Brain can use `gmail__send_email` (if connected) to send the report. The report path is stored in tenant memory so the Brain has context on follow-up messages.
+
 ## Error Handling
 
 - Gemini API errors (429, 500) → throw descriptive error, ToolExecutor catches and returns to LLM
