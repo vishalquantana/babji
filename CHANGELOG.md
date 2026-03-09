@@ -6,6 +6,10 @@ All notable changes to Babji are documented here. Each entry notes whether the c
 
 ## 2026-03-09
 
+### Conversational disconnect prompt for unconnected services [DEPLOYED]
+- **What:** Changed the system prompt for unconnected services from a blunt "not connected, type connect X" to a 3-step conversational flow: acknowledge goal, explain what Babji can do once connected, offer to set it up naturally.
+- **Files:** `packages/agent/src/prompt-builder.ts`
+
 ### People Researcher error handling fix [DEPLOYED]
 - **What:** DataForSEO returns HTTP 200 with task-level errors (e.g. 40207 IP whitelist). Added check for `task.status_code`, wrapped external calls in try/catch, return explicit error messages so the LLM doesn't hallucinate reasons.
 - **Files:** `packages/skills/src/people/handler.ts`

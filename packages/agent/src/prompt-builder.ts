@@ -63,9 +63,14 @@ export class PromptBuilder {
     if (disconnectedSkills.length > 0) {
       parts.push("");
       parts.push("## Services available to connect (NOT yet connected)");
-      parts.push("These services are NOT connected. You CANNOT use them. If the user asks about any of these, tell them they need to connect first by typing the connect command shown below. NEVER make up a URL — just tell them what to type.");
+      parts.push("These services are NOT connected yet. You CANNOT call their tools. But when the user asks about something that needs one of these services:");
+      parts.push("1. Acknowledge what they want to do and show you understand their goal");
+      parts.push("2. Briefly explain what you'll be able to help with once connected (be specific to their request)");
+      parts.push('3. Offer to connect right now: "Want me to set that up? Just type connect <service>" -- keep it natural, one line');
+      parts.push("Do NOT just say 'service not connected, type connect X'. That's robotic. Be helpful and conversational.");
+      parts.push("NEVER make up a URL -- just tell them what to type.");
       for (const skill of disconnectedSkills) {
-        parts.push(`- ${skill.displayName}: ${skill.description} → tell user to type: "connect ${skill.name}"`);
+        parts.push(`- ${skill.displayName}: ${skill.description} -> connect command: "connect ${skill.name}"`);
       }
     }
 
