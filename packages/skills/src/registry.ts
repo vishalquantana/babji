@@ -283,6 +283,11 @@ const googleAdsSkill: SkillDefinition = {
   },
   actions: [
     {
+      name: "list_accounts",
+      description: "List all Google Ads accounts the user has access to. Call this FIRST before any other google_ads action -- it returns account IDs and names so the user can pick which account to work with. No parameters needed.",
+      parameters: {},
+    },
+    {
       name: "list_campaigns",
       description: "List all campaigns in the account with status and budget.",
       parameters: {
@@ -664,6 +669,117 @@ const checkWithTeacherSkill: SkillDefinition = {
         },
       },
     },
+    {
+      name: "connect_service",
+      description: "Generate an OAuth sign-in link for the user to connect a service. Call this whenever the user wants to connect a service or agrees to connect one. The tool returns a short URL -- include it in your reply so the user can click it.",
+      parameters: {
+        service_name: {
+          type: "string",
+          required: true,
+          description: "The service to connect. One of: gmail, google_calendar, google_ads, google_analytics",
+        },
+      },
+    },
+    {
+      name: "add_task",
+      description: "Add a new todo or reminder for the user. Use smart defaults for remind_before: gift/purchase tasks get 5-7 days, preparation tasks 2-3 days, meetings 1 day, general deadlines 1 day. Always confirm the reminder timing with the user after creating.",
+      parameters: {
+        title: {
+          type: "string",
+          required: true,
+          description: "Short description of what to do",
+        },
+        due_date: {
+          type: "string",
+          required: false,
+          description: "Due date in ISO format YYYY-MM-DD. Omit for general todos with no deadline.",
+        },
+        remind_before: {
+          type: "string",
+          required: false,
+          description: "How long before due_date to send a reminder. Examples: '5d' (5 days), '1w' (1 week), '3h' (3 hours). Only works if due_date is set.",
+        },
+        priority: {
+          type: "string",
+          required: false,
+          description: "Priority: 'low', 'medium' (default), or 'high'",
+        },
+        notes: {
+          type: "string",
+          required: false,
+          description: "Additional context or details about the task",
+        },
+      },
+    },
+    {
+      name: "list_tasks",
+      description: "List the user's todos. Call this when the user asks 'what are my todos', 'what should I work on today', 'what's on my plate', or similar.",
+      parameters: {
+        status: {
+          type: "string",
+          required: false,
+          description: "Filter: 'pending' (default), 'done', or 'all'",
+        },
+      },
+    },
+    {
+      name: "complete_task",
+      description: "Mark a todo as done.",
+      parameters: {
+        task_id: {
+          type: "string",
+          required: true,
+          description: "The UUID of the task to complete",
+        },
+      },
+    },
+    {
+      name: "update_task",
+      description: "Update a todo's title, due date, reminder timing, priority, or notes.",
+      parameters: {
+        task_id: {
+          type: "string",
+          required: true,
+          description: "The UUID of the task to update",
+        },
+        title: {
+          type: "string",
+          required: false,
+          description: "New title",
+        },
+        due_date: {
+          type: "string",
+          required: false,
+          description: "New due date in YYYY-MM-DD format",
+        },
+        remind_before: {
+          type: "string",
+          required: false,
+          description: "New reminder offset, e.g. '3d', '1w'",
+        },
+        priority: {
+          type: "string",
+          required: false,
+          description: "New priority: 'low', 'medium', 'high'",
+        },
+        notes: {
+          type: "string",
+          required: false,
+          description: "New notes",
+        },
+      },
+    },
+    {
+      name: "delete_task",
+      description: "Delete a todo permanently.",
+      parameters: {
+        task_id: {
+          type: "string",
+          required: true,
+          description: "The UUID of the task to delete",
+        },
+      },
+    },
   ],
   creditsPerAction: 0,
 };
@@ -736,7 +852,32 @@ const peopleSkill: SkillDefinition = {
   creditsPerAction: 1,
 };
 
-const allSkills: SkillDefinition[] = [gmailSkill, calendarSkill, googleAdsSkill, googleAnalyticsSkill, checkWithTeacherSkill, peopleSkill];
+const generalResearchSkill: SkillDefinition = {
+  name: "general_research",
+  displayName: "General Research",
+  description: "Search the web and research any topic. Use quick_research for fast answers and deep_research for comprehensive reports.",
+  actions: [
+    {
+      name: "quick_research",
+      description: "Quick web search with grounded answers. Returns an answer with source citations. Good for factual questions, current events, quick lookups.",
+      parameters: {
+        query: { type: "string", required: true, description: "The search query or research question" },
+        context: { type: "string", required: false, description: "Additional context to guide the search" },
+      },
+    },
+    {
+      name: "deep_research",
+      description: "Start a comprehensive deep research task. Takes 5-20 minutes. Results are delivered automatically when ready. Use for market research, industry analysis, detailed topic exploration.",
+      parameters: {
+        query: { type: "string", required: true, description: "The research topic or question" },
+        instructions: { type: "string", required: false, description: "Specific instructions for the report structure or focus areas" },
+      },
+    },
+  ],
+  creditsPerAction: 1,
+};
+
+const allSkills: SkillDefinition[] = [gmailSkill, calendarSkill, googleAdsSkill, googleAnalyticsSkill, checkWithTeacherSkill, peopleSkill, generalResearchSkill];
 
 /**
  * Load all registered skill definitions.
