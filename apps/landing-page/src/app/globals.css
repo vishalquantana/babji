@@ -1,0 +1,92 @@
+@import "tailwindcss";
+
+:root {
+  --background: #FDF8F5;
+  /* Warm Vintage Beige */
+  --foreground: #2B211E;
+  /* Deep Espresso/Charcoal */
+}
+
+@theme inline {
+  --color-obsidian: #2B211E;
+  /* Aliased to Espresso */
+  --color-royal-red: #D8232A;
+  /* Maharaja Red */
+  --color-royal-gold: #F1B434;
+  /* Royal Mustard/Gold */
+  --color-royal-beige: #FDF8F5;
+  /* Warm Vintage Beige */
+  --color-juice: #D8232A;
+  /* Aliased to Red for primary highlights */
+  --font-serif: var(--font-serif);
+  --font-mono: var(--font-mono);
+  --font-sans: var(--font-sans);
+  --font-display: var(--font-display);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  overflow-x: hidden;
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(216, 35, 42, 0.1);
+  /* Subtle red border */
+  border-radius: 1rem;
+  box-shadow: 0 10px 40px -10px rgba(216, 35, 42, 0.08);
+  /* Warm red shadow */
+}
+
+.glass-glow {
+  box-shadow: 0 0 30px rgba(241, 180, 52, 0.25);
+  /* Gold glow */
+}
+
+.juice-text {
+  background: linear-gradient(90deg, #D8232A 0%, #F1B434 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.glow {
+  box-shadow: 0 0 15px currentColor;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #FDF8F5;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(216, 35, 42, 0.4);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #D8232A;
+}
+
+/* Custom Animations */
+@keyframes shimmer {
+  100% {
+    left: 100%;
+  }
+}
+
+@keyframes scan {
+  from {
+    transform: translateY(-100%) rotate(45deg);
+  }
+
+  to {
+    transform: translateY(200%) rotate(45deg);
+  }
+}
