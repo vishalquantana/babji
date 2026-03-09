@@ -37,7 +37,12 @@ export class OnboardingHandler {
       return this.reply(message, this.welcomeMessage());
     }
 
-    // Simple heuristic: treat as a name if 2-50 chars and contains at least one letter
+    // User asked a question or made a request instead of providing a name
+    if (this.looksLikeQuestionOrRequest(trimmed)) {
+      return this.reply(message, this.deflectQuestionMessage());
+    }
+
+    // Simple heuristic: treat as a name if short, has a letter, doesn't look like a sentence
     if (this.looksLikeName(trimmed)) {
       const tenantId = randomUUID();
       const name = trimmed;
@@ -76,6 +81,8 @@ export class OnboardingHandler {
       return false;
     }
 
+    const lower = value.toLowerCase();
+
     // Common greetings and phrases that aren't names
     const notNames = new Set([
       "hello", "hi", "hey", "hiya", "howdy", "sup",
@@ -86,7 +93,29 @@ export class OnboardingHandler {
       "how", "why", "test", "testing",
     ]);
 
-    return !notNames.has(value.toLowerCase());
+    if (notNames.has(lower)) return false;
+
+    // Questions (contains ?) or starts with question words followed by more text
+    if (value.includes("?")) return false;
+    if (/^(what|how|why|when|where|who|can|could|will|would|do|does|is|are|should|tell)\b/i.test(value)) return false;
+
+    // Sentences — names rarely have 5+ words
+    const wordCount = value.split(/\s+/).length;
+    if (wordCount > 4) return false;
+
+    // Contains verbs/phrases that indicate a statement, not a name
+    if (/\b(make|help|want|need|like|please|work|show|give|get|find|know|think|have)\b/i.test(lower) && wordCount > 2) return false;
+
+    return true;
+  }
+
+  /** Check if user is asking a question or making a request instead of providing their name */
+  looksLikeQuestionOrRequest(value: string): boolean {
+    const lower = value.toLowerCase().trim();
+    if (lower.includes("?")) return true;
+    if (/^(what|how|why|when|where|who|can|could|will|would|do|does|is|are|should|tell)\b/i.test(lower)) return true;
+    if (/\b(help|want|need|make|show|give|find)\b/i.test(lower) && lower.split(/\s+/).length > 2) return true;
+    return false;
   }
 
   private welcomeMessage(): string {
@@ -94,6 +123,14 @@ export class OnboardingHandler {
       "Hey there! I'm Babji -- think of me as your business helper who lives right here in this chat.",
       "",
       "What should I call you?",
+    ].join("\n");
+  }
+
+  private deflectQuestionMessage(): string {
+    return [
+      "I can definitely help with that! But first, let me get to know you.",
+      "",
+      "What's your name?",
     ].join("\n");
   }
 

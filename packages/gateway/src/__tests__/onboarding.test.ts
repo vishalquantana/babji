@@ -185,6 +185,43 @@ describe("OnboardingHandler", () => {
     expect(result.text).not.toContain("phone");
   });
 
+  it("deflects when user asks a question instead of giving a name", async () => {
+    const deps = makeDeps();
+    const handler = new OnboardingHandler(deps as any);
+
+    const result = await handler.handle(
+      makeMessage({ text: "How can you make my daily work easier" }),
+    );
+
+    expect(result.text).toContain("help with that");
+    expect(result.text).toContain("name");
+    expect(deps.db.insert).not.toHaveBeenCalled();
+  });
+
+  it("deflects when user asks a question with question mark", async () => {
+    const deps = makeDeps();
+    const handler = new OnboardingHandler(deps as any);
+
+    const result = await handler.handle(
+      makeMessage({ text: "What can you do?" }),
+    );
+
+    expect(result.text).toContain("help with that");
+    expect(result.text).toContain("name");
+    expect(deps.db.insert).not.toHaveBeenCalled();
+  });
+
+  it("rejects long phrases as names", async () => {
+    const deps = makeDeps();
+    const handler = new OnboardingHandler(deps as any);
+
+    const result = await handler.handle(
+      makeMessage({ text: "I want to know what you can do for me" }),
+    );
+
+    expect(deps.db.insert).not.toHaveBeenCalled();
+  });
+
   it("sets onboardingPhase to 'role' when creating tenant", async () => {
     const deps = makeDeps();
     const handler = new OnboardingHandler(deps as any);
