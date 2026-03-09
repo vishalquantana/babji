@@ -162,6 +162,48 @@ export class MessageHandler {
 
       const tenantId = tenant.id;
 
+      // ── Handle onboarding phases ──
+      if (tenant.onboardingPhase === "role") {
+        const roleText = message.text.trim();
+
+        // Store the role in memory
+        await this.deps.memory.appendMemory(tenantId, `Work/business: ${roleText}`);
+
+        // Detect timezone from role text (e.g., "I run a shop in Mumbai")
+        const currentTz = tenant.timezone ?? "UTC";
+        if (currentTz === "UTC") {
+          const detectedTz = timezoneFromText(roleText);
+          if (detectedTz) {
+            await this.deps.db.update(schema.tenants)
+              .set({ timezone: detectedTz })
+              .where(eq(schema.tenants.id, tenantId));
+          }
+        }
+
+        // Update phase to "ready"
+        await this.deps.db.update(schema.tenants)
+          .set({ onboardingPhase: "ready" })
+          .where(eq(schema.tenants.id, tenantId));
+
+        // Generate tailored suggestions based on role
+        const suggestions = this.generateOnboardingSuggestions(roleText);
+
+        return {
+          tenantId,
+          channel,
+          recipient: sender,
+          text: [
+            `Got it -- ${roleText}, that's interesting!`,
+            "",
+            "Let me show you what I can do right away. Try asking me something like:",
+            "",
+            ...suggestions.map((s) => `- "${s}"`),
+            "",
+            "Just type one of those, or ask me anything you're curious about.",
+          ].join("\n"),
+        };
+      }
+
       // ── Handle phone number collection (Telegram users without phone) ──
       if (!tenant.phone && channel === "telegram") {
         const trimmedText = message.text.trim().toLowerCase();
@@ -673,5 +715,84 @@ export class MessageHandler {
       recipient: sender,
       text: `Click the link below to connect your ${link.displayName}:\n\n${url}`,
     };
+  }
+
+  /**
+   * Generate 3 tailored suggestions based on the user's role/business.
+   * Uses keyword matching — no LLM call needed.
+   */
+  private generateOnboardingSuggestions(role: string): string[] {
+    const lower = role.toLowerCase();
+
+    if (/rice|grain|commodity|agri|farm|crop/.test(lower)) {
+      return [
+        "What is the current market price of basmati rice?",
+        "Remind me to call the supplier tomorrow at 10am",
+        "Research top rice exporters in India",
+      ];
+    }
+    if (/market|advertis|ads|digital|seo|social media|agency/.test(lower)) {
+      return [
+        "Research the latest Google Ads best practices",
+        "Remind me to send the campaign report by Friday",
+        "Find the marketing head at [competitor company]",
+      ];
+    }
+    if (/real estate|property|broker|construction/.test(lower)) {
+      return [
+        "Research current real estate trends in my city",
+        "Remind me to follow up with the buyer tomorrow",
+        "Find contact info for [a developer or agency]",
+      ];
+    }
+    if (/restaurant|food|cafe|hotel|hospitality/.test(lower)) {
+      return [
+        "Research food delivery trends in 2026",
+        "Remind me to order supplies by Thursday",
+        "Find contact info for [a food supplier]",
+      ];
+    }
+    if (/retail|shop|store|ecommerce|e-commerce/.test(lower)) {
+      return [
+        "Research trending products in my category",
+        "Remind me to restock inventory this week",
+        "Find the supplier for [a product you sell]",
+      ];
+    }
+    if (/consult|freelance|coach|train/.test(lower)) {
+      return [
+        "Research industry benchmarks for my field",
+        "Remind me about the client call tomorrow at 3pm",
+        "Find the LinkedIn profile of [a potential client]",
+      ];
+    }
+    if (/doctor|clinic|health|medical|pharma/.test(lower)) {
+      return [
+        "Research recent developments in [your specialty]",
+        "Remind me to review patient files before rounds",
+        "Find contact info for [a medical supplier]",
+      ];
+    }
+    if (/law|legal|advocate|attorney/.test(lower)) {
+      return [
+        "Research recent changes in [area of law]",
+        "Remind me about the court hearing on Friday",
+        "Find the LinkedIn profile of [opposing counsel]",
+      ];
+    }
+    if (/teach|school|education|tutor|professor/.test(lower)) {
+      return [
+        "Research new teaching methods for [your subject]",
+        "Remind me to prepare lesson plans by Sunday",
+        "Find educational resources on [topic]",
+      ];
+    }
+
+    // Default suggestions that work for anyone
+    return [
+      "What are the latest trends in my industry?",
+      "Remind me to follow up with a client tomorrow at 10am",
+      "Find contact info for [a company you're interested in]",
+    ];
   }
 }
