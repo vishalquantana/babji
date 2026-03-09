@@ -76,14 +76,21 @@ export class Brain {
         allToolCalls.push(toolCall);
         const result = await this.toolExecutor.execute(toolCall);
         console.log(`[Brain] Tool result: success=${result.success}${result.error ? ` error=${result.error}` : ""} resultSize=${JSON.stringify(result.result ?? null).length}`);
-        // Truncate large results to avoid blowing up context
-        const resultJson = JSON.stringify(result.result ?? null, null, 2);
-        const truncated = resultJson.length > 4000
-          ? resultJson.slice(0, 4000) + "\n...(truncated)"
-          : resultJson;
-        resultSummaries.push(
-          `[${toolCall.skillName}.${toolCall.actionName}] Result:\n${truncated}`
-        );
+
+        if (result.success) {
+          // Truncate large results to avoid blowing up context
+          const resultJson = JSON.stringify(result.result ?? null, null, 2);
+          const truncated = resultJson.length > 4000
+            ? resultJson.slice(0, 4000) + "\n...(truncated)"
+            : resultJson;
+          resultSummaries.push(
+            `[${toolCall.skillName}.${toolCall.actionName}] Result:\n${truncated}`
+          );
+        } else {
+          resultSummaries.push(
+            `[${toolCall.skillName}.${toolCall.actionName}] ERROR: ${result.error}\nIMPORTANT: This tool call FAILED. Do NOT tell the user you found "nothing" or "no results". Tell them about this error and offer to help fix it.`
+          );
+        }
       }
 
       // Feed tool results back as a user message so we avoid complex

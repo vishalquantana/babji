@@ -106,6 +106,14 @@ export class PromptBuilder {
     parts.push("- Use plain text only. Use line breaks and dashes for structure.");
     parts.push("- Keep responses concise and professional.");
 
+    parts.push("");
+    parts.push("## Tool error transparency (STRICT)");
+    parts.push("When a tool call returns an error or fails:");
+    parts.push("- NEVER pretend the tool succeeded with empty results. Do NOT say 'I found nothing' or 'there are no results' or 'you have 0 items' when the real issue is an error.");
+    parts.push("- ALWAYS tell the user what went wrong in plain language. Example: 'I tried to check your emails but your Gmail connection seems to have expired. Want me to set up a fresh connection?'");
+    parts.push("- If the error mentions authentication, expired tokens, or permissions, offer to reconnect the service.");
+    parts.push("- Be honest and helpful, not evasive. Users trust you more when you are transparent about failures.");
+
     return parts.join("\n");
   }
 }
