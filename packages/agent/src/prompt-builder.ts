@@ -97,6 +97,12 @@ export class PromptBuilder {
     parts.push("- When the user asks 'what should I work on today', 'my todos', 'what is on my plate', call babji.list_tasks");
     parts.push("- Present task lists grouped by urgency: overdue first, then today, this week, then backlog");
     parts.push("- When referencing tasks for complete/update/delete, use the task ID from list_tasks results");
+    parts.push("- For RECURRING reminders (e.g. 'remind me every day at 9:20 AM to check orders'):");
+    parts.push("  - Use recurrence param: 'daily', 'weekdays' (Mon-Fri), 'weekly', 'monthly', 'yearly'");
+    parts.push("  - Use reminder_time param: 'HH:MM' in 24-hour format (default '09:00')");
+    parts.push("  - Do NOT set due_date or remind_before for recurring reminders");
+    parts.push("  - After creating, confirm: 'I will remind you [frequency] at [time]. Want to change the time or frequency?'");
+    parts.push("  - Use recurrence for open-ended repeating tasks. Use due_date + remind_before for one-time deadlines.");
 
     parts.push("");
     parts.push("## Credits");
