@@ -307,7 +307,7 @@ export class JobRunner {
 
   private async runTodoReminder(job: typeof schema.scheduledJobs.$inferSelect): Promise<void> {
     const tenantId = job.tenantId;
-    const payload = job.payload as { todoId?: string; title?: string } | null;
+    const payload = job.payload as { todoId?: string; title?: string; recurrence?: string } | null;
 
     if (!payload?.todoId) {
       logger.warn({ jobId: job.id }, "todo_reminder job missing todoId in payload");
@@ -343,26 +343,42 @@ export class JobRunner {
 
     // Format a friendly reminder
     const title = todo.title;
-    let message = `Hey ${tenant.name}, just a heads up -- "${title}"`;
-    if (todo.dueDate) {
-      const formattedDate = new Date(todo.dueDate + "T00:00:00").toLocaleDateString("en-US", {
-        timeZone: tenant.timezone || "UTC",
-        month: "long",
-        day: "numeric",
-        year: "numeric",
-      });
-      message += ` is coming up on ${formattedDate}`;
+    const recurrence = payload.recurrence;
+    let message: string;
+
+    if (recurrence) {
+      // Recurring reminder — simple nudge
+      message = `Hey ${tenant.name}, reminder -- ${title}`;
+    } else {
+      // One-shot reminder — offer actions
+      message = `Hey ${tenant.name}, just a heads up -- "${title}"`;
+      if (todo.dueDate) {
+        const formattedDate = new Date(todo.dueDate + "T00:00:00").toLocaleDateString("en-US", {
+          timeZone: tenant.timezone || "UTC",
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+        });
+        message += ` is coming up on ${formattedDate}`;
+      }
+      message += `. Want to mark it done, push it back, or need help with it?`;
     }
-    message += `. Want to mark it done, push it back, or need help with it?`;
 
     await adapter.sendMessage({ tenantId, channel, recipient, text: message });
 
-    logger.info({ tenantId, todoId: payload.todoId, title }, "Sent todo reminder");
+    logger.info({ tenantId, todoId: payload.todoId, title, recurrence: recurrence || "once" }, "Sent todo reminder");
 
-    // Mark job as completed (one-time)
-    await this.deps.db.update(schema.scheduledJobs)
-      .set({ status: "completed", lastRunAt: new Date() })
-      .where(eq(schema.scheduledJobs.id, job.id));
+    // Handle rescheduling
+    if (!recurrence || job.scheduleType === "once") {
+      // One-time job — mark as completed
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "completed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+    } else {
+      // Recurring job — reschedule for next occurrence
+      const timezone = tenant.timezone || "UTC";
+      await this.rescheduleRecurring(job, recurrence, timezone);
+    }
   }
 
   private async runDeepResearch(job: typeof schema.scheduledJobs.$inferSelect): Promise<void> {
@@ -552,6 +568,86 @@ export class JobRunner {
       .where(eq(schema.scheduledJobs.id, job.id));
 
     logger.info({ jobId: job.id, nextRun: nextRun.toISOString() }, "Rescheduled daily job");
+  }
+
+  private async rescheduleRecurring(
+    job: typeof schema.scheduledJobs.$inferSelect,
+    recurrence: string,
+    timezone: string,
+  ): Promise<void> {
+    const localTime = job.recurrenceRule || "09:00";
+    let nextRun: Date;
+
+    switch (recurrence) {
+      case "daily":
+        nextRun = nextUtcForLocalTime(localTime, timezone);
+        break;
+
+      case "weekdays": {
+        nextRun = nextUtcForLocalTime(localTime, timezone);
+        // Check the day of week in the tenant's timezone
+        const dayStr = new Intl.DateTimeFormat("en-US", { timeZone: timezone, weekday: "short" }).format(nextRun);
+        if (dayStr === "Sat") {
+          nextRun = new Date(nextRun.getTime() + 2 * 86_400_000); // Sat -> Mon
+        } else if (dayStr === "Sun") {
+          nextRun = new Date(nextRun.getTime() + 1 * 86_400_000); // Sun -> Mon
+        }
+        break;
+      }
+
+      case "weekly":
+        // nextUtcForLocalTime gives tomorrow at the same time; add 6 more days = 7 total
+        nextRun = new Date(nextUtcForLocalTime(localTime, timezone).getTime() + 6 * 86_400_000);
+        break;
+
+      case "monthly": {
+        const [hours, minutes] = localTime.split(":").map(Number);
+        const nowParts = new Intl.DateTimeFormat("en-CA", {
+          timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit",
+        }).formatToParts(new Date());
+        const getPart = (type: string) => Number(nowParts.find((p) => p.type === type)?.value || "1");
+        const curYear = getPart("year");
+        const curMonth = getPart("month") - 1; // 0-indexed
+        const curDay = getPart("day");
+
+        const targetMonth = curMonth + 1;
+        const targetYear = targetMonth > 11 ? curYear + 1 : curYear;
+        const clampedMonth = targetMonth > 11 ? 0 : targetMonth;
+        // Clamp day to max days in target month
+        const maxDay = new Date(targetYear, clampedMonth + 1, 0).getDate();
+        const targetDay = Math.min(curDay, maxDay);
+
+        const targetLocal = new Date(targetYear, clampedMonth, targetDay, hours, minutes, 0);
+        const utcStr = targetLocal.toLocaleString("en-US", { timeZone: "UTC" });
+        const tzStr = targetLocal.toLocaleString("en-US", { timeZone: timezone });
+        nextRun = new Date(targetLocal.getTime() + (new Date(utcStr).getTime() - new Date(tzStr).getTime()));
+        break;
+      }
+
+      case "yearly": {
+        const [hours, minutes] = localTime.split(":").map(Number);
+        const nowParts = new Intl.DateTimeFormat("en-CA", {
+          timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit",
+        }).formatToParts(new Date());
+        const getPart = (type: string) => Number(nowParts.find((p) => p.type === type)?.value || "1");
+
+        const targetLocal = new Date(getPart("year") + 1, getPart("month") - 1, getPart("day"), hours, minutes, 0);
+        const utcStr = targetLocal.toLocaleString("en-US", { timeZone: "UTC" });
+        const tzStr = targetLocal.toLocaleString("en-US", { timeZone: timezone });
+        nextRun = new Date(targetLocal.getTime() + (new Date(utcStr).getTime() - new Date(tzStr).getTime()));
+        break;
+      }
+
+      default:
+        nextRun = nextUtcForLocalTime(localTime, timezone);
+        break;
+    }
+
+    await this.deps.db.update(schema.scheduledJobs)
+      .set({ scheduledAt: nextRun, lastRunAt: new Date() })
+      .where(eq(schema.scheduledJobs.id, job.id));
+
+    logger.info({ jobId: job.id, recurrence, nextRun: nextRun.toISOString() }, "Rescheduled recurring todo reminder");
   }
 
   private getGreeting(timezone: string): string {
