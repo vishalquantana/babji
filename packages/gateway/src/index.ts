@@ -54,7 +54,13 @@ async function main() {
 
   // Admin notifier for skill requests
   if (config.adminBot.enabled) {
-    const adminNotifier = new AdminNotifier(config.adminBot.botToken, config.adminBot.chatId);
+    const jiraConfig = config.jira.enabled ? {
+      host: config.jira.host,
+      email: config.jira.email,
+      apiToken: config.jira.apiToken,
+      projectKey: config.jira.projectKey,
+    } : undefined;
+    const adminNotifier = new AdminNotifier(config.adminBot.botToken, config.adminBot.chatId, jiraConfig);
     skillRequests.onCreated(async (tenantId, skillName, context) => {
       const tenant = await db.query.tenants.findFirst({
         where: eq(schema.tenants.id, tenantId),

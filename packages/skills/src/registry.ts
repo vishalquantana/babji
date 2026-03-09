@@ -225,6 +225,27 @@ const calendarSkill: SkillDefinition = {
       },
     },
     {
+      name: "rsvp_event",
+      description: "Accept, decline, or mark tentative for a calendar event (RSVP).",
+      parameters: {
+        event_id: {
+          type: "string",
+          required: true,
+          description: "The event ID to RSVP to",
+        },
+        response: {
+          type: "string",
+          required: true,
+          description: "One of: accepted, declined, tentative",
+        },
+        calendar_id: {
+          type: "string",
+          required: false,
+          description: "Calendar ID (defaults to 'primary')",
+        },
+      },
+    },
+    {
       name: "find_free_slots",
       description: "Find available/busy time slots across calendars.",
       parameters: {

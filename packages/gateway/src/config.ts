@@ -19,6 +19,13 @@ export interface GatewayConfig {
     botToken: string;
     chatId: string;
   };
+  jira: {
+    enabled: boolean;
+    host: string;
+    email: string;
+    apiToken: string;
+    projectKey: string;
+  };
 }
 
 export function loadConfig(): GatewayConfig {
@@ -44,6 +51,13 @@ export function loadConfig(): GatewayConfig {
       enabled: !!process.env.ADMIN_BOT_TOKEN && !!process.env.ADMIN_TELEGRAM_ID,
       botToken: process.env.ADMIN_BOT_TOKEN || "",
       chatId: process.env.ADMIN_TELEGRAM_ID || "",
+    },
+    jira: {
+      enabled: !!process.env.JIRA_API_TOKEN,
+      host: process.env.JIRA_HOST || "quantana.atlassian.net",
+      email: process.env.JIRA_EMAIL || "",
+      apiToken: process.env.JIRA_API_TOKEN || "",
+      projectKey: process.env.JIRA_PROJECT_KEY || "BAB",
     },
   };
 }
