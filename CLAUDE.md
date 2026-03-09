@@ -43,13 +43,14 @@ User (Telegram/WhatsApp)
 - **Gateway log**: `/var/log/babji-gateway.log`
 - **Node/pnpm available at**: `/usr/bin/node`, `/usr/bin/pnpm`
 
-### OAuth Portal Server
-- **IP**: `149.28.203.167`
-- **SSH**: `ssh root@149.28.203.167`
+### OAuth Portal (runs on same server as Gateway)
+- **Same server**: `65.20.76.199`
 - **Domain**: `babji.quantana.top` (nginx reverse proxy with Let's Encrypt SSL)
-- **Next.js port**: 3000
-- **pnpm location**: `/usr/lib/node_modules/corepack/shims/pnpm`
+- **Next.js port**: 3100 (nginx proxies from 443)
+- **Start script**: `/opt/babji/start-oauth-portal.sh` (sources .env, then runs Next.js)
+- **Log**: `/var/log/babji-oauth.log`
 - **Handles**: OAuth callbacks, admin dashboard (`/admin`), short links (`/link/<id>`)
+- **IMPORTANT**: Always use `start-oauth-portal.sh` to start — it sources `.env` for DATABASE_URL, ENCRYPTION_KEY, etc.
 
 ## How to Run
 
@@ -89,13 +90,18 @@ ssh root@65.20.76.199 'sleep 2 && tail -10 /var/log/babji-gateway.log'
 ```
 
 ### Deploy OAuth Portal
+The OAuth portal runs on the **same server as the gateway** (65.20.76.199), on port 3100 behind nginx.
 ```bash
-rsync -az --delete \
-  --exclude node_modules --exclude .git --exclude .env \
-  /Users/vishalkumar/Downloads/babji/ root@149.28.203.167:/opt/babji/
+# After rsync + pnpm install (same as gateway deploy above):
 
-ssh root@149.28.203.167 'export PATH="/usr/lib/node_modules/corepack/shims:$PATH" && cd /opt/babji && pnpm install --frozen-lockfile'
-# Restart Next.js (managed by next-server, port 3000)
+# 1. Build on server
+ssh root@65.20.76.199 'cd /opt/babji && pnpm --filter oauth-portal build'
+
+# 2. Restart OAuth portal (MUST use start script to source .env)
+ssh root@65.20.76.199 'kill $(pgrep -f "next-server") 2>/dev/null; sleep 1; nohup /opt/babji/start-oauth-portal.sh > /var/log/babji-oauth.log 2>&1 &'
+
+# 3. Verify
+ssh root@65.20.76.199 'sleep 3 && tail -5 /var/log/babji-oauth.log'
 ```
 
 ### Local Development
@@ -120,6 +126,19 @@ pnpm --filter @babji/gateway test   # vitest
 | `OAUTH_PORTAL_URL` | OAuth portal base URL (`https://babji.quantana.top`) |
 | `MEMORY_BASE_DIR` | Tenant file storage path (`/opt/babji/data/tenants`) |
 | `ADMIN_PASSWORD` | Admin dashboard password (`babji2026`) |
+| `JIRA_HOST` | Jira instance hostname (`quantana.atlassian.net`) |
+| `JIRA_EMAIL` | Jira auth email (from .env on server) |
+| `JIRA_API_TOKEN` | Jira API token (from .env on server) |
+| `JIRA_PROJECT_KEY` | Jira project key (`BAB`) |
+
+## Jira Integration
+- **Board**: `https://quantana.atlassian.net/jira/core/projects/BAB/board`
+- **API**: Credentials stored in production `.env` (`JIRA_EMAIL`, `JIRA_API_TOKEN`)
+- **Query open tickets**: `ssh root@65.20.76.199 'source /opt/babji/.env && curl -s "https://${JIRA_HOST}/rest/api/3/search/jql?jql=project%3DBAB%20AND%20status%21%3DDone%20ORDER%20BY%20created%20DESC" -u "${JIRA_EMAIL}:${JIRA_API_TOKEN}" -H "Accept: application/json"'`
+- **Auto-creates tickets**: `AdminNotifier` creates Jira tickets when skill requests come in (`packages/gateway/src/admin-notifier.ts`)
+
+### Open Jira Tickets
+No open tickets currently. Last completed: BAB-3 (general_research skill, Done).
 
 ## Database Tables (Drizzle ORM)
 - `tenants` - User accounts (name, phone, telegramUserId, plan, credits)

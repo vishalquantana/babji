@@ -6,6 +6,25 @@ All notable changes to Babji are documented here. Each entry notes whether the c
 
 ## 2026-03-09
 
+### General Research skill (BAB-3) [DEPLOYED]
+- **What:** Added `general_research` skill with two actions: `quick_research` (Gemini Flash + Google Search grounding, synchronous) and `deep_research` (Gemini Deep Research Interactions API, async fire-and-forget with JobRunner delivery through Brain). Full deep research reports saved to disk at `/opt/babji/data/reports/`. After summary delivery, Babji offers to email the full report.
+- **Files:** `packages/skills/src/general-research/handler.ts` (new), `packages/skills/src/general-research/index.ts` (new), `packages/skills/src/registry.ts`, `packages/skills/src/index.ts`, `packages/gateway/src/message-handler.ts`, `packages/gateway/src/job-runner.ts`, `packages/gateway/src/index.ts`
+- **Jira:** BAB-3 (Done)
+- **No new env vars** — reuses GOOGLE_API_KEY and GOOGLE_MODEL
+
+### Google Ads: API version upgrade v17 -> v20, list_accounts action, better errors [DEPLOYED]
+- **What:** Upgraded Google Ads REST API from v17 (sunset) to v20. Added `list_accounts` action using `listAccessibleCustomers` (no customer ID needed). Improved error extraction to surface Google Ads detail messages (e.g., `DEVELOPER_TOKEN_NOT_APPROVED`) instead of generic "permission denied". Detects test-token limitation and warns user clearly.
+- **Files:** `packages/skills/src/google-ads/handler.ts`, `packages/skills/src/registry.ts`
+- **Note:** Developer token currently at Test access. Basic access applied for — once approved, account names and campaign data will work.
+
+### LLM-driven connect flow via connect_service tool [DEPLOYED]
+- **What:** Added `babji.connect_service` tool so the LLM can generate OAuth sign-in links directly. Previously, the LLM told users to type "connect google_ads" — now it calls the tool itself and includes the link in its reply. User says "yes" -> LLM generates the link immediately, no extra commands needed.
+- **Files:** `packages/skills/src/registry.ts`, `packages/gateway/src/message-handler.ts`, `packages/agent/src/prompt-builder.ts`
+
+### OAuth portal: Add Google Ads and Google Analytics providers [DEPLOYED]
+- **What:** Added `google_ads` and `google_analytics` to the OAuth portal's provider configuration. Without these, the OAuth callback would return "Unknown provider" when Google redirected back after authorization.
+- **Files:** `apps/oauth-portal/src/lib/providers.ts`
+
 ### Google Ads developer token as server-side env var [DEPLOYED]
 - **What:** Moved Google Ads developer token from per-tenant vault to server-side env var `GOOGLE_ADS_DEVELOPER_TOKEN`. The developer token is an app-level credential, not per-user.
 - **Files:** `packages/gateway/src/config.ts`, `packages/gateway/src/message-handler.ts`, `packages/gateway/src/index.ts`
