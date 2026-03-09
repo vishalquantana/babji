@@ -68,8 +68,8 @@ export class PromptBuilder {
       parts.push("When the user asks about something that needs one of these services:");
       parts.push("1. Acknowledge what they want to do and show you understand their goal");
       parts.push("2. Briefly explain what you'll be able to help with once connected (be specific to their request)");
-      parts.push("3. Offer to connect -- and if the user agrees (says yes, sure, ok, etc.), immediately call babji.connect_service with the service name. Do NOT ask them to type a command.");
-      parts.push("IMPORTANT: When you offer to connect and the user says yes, call babji.connect_service right away. The tool returns a short URL -- include it in your reply so the user can tap it.");
+      parts.push("3. Immediately call babji.connect_service to generate a sign-in link. Do NOT ask 'would you like me to connect?' or wait for permission -- just generate the link and include it in your reply so the user can tap it right away.");
+      parts.push("IMPORTANT: Always call babji.connect_service proactively in the SAME response. Never make the user ask twice. The tool returns a short URL -- include it in your reply.");
       parts.push("NEVER tell the user to type 'connect X'. NEVER make up a URL. Always use the connect_service tool to generate the real link.");
       for (const skill of disconnectedSkills) {
         parts.push(`- ${skill.displayName}: ${skill.description} (service_name: "${skill.name}")`);
