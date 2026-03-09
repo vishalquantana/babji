@@ -161,7 +161,11 @@ export function DashboardClient() {
             <tbody>
               {data.tenants.map((t) => (
                 <tr key={t.id} style={{ borderBottom: "1px solid #f5f5f5" }}>
-                  <td style={{ padding: "8px 0", fontWeight: 500 }}>{t.name}</td>
+                  <td style={{ padding: "8px 0", fontWeight: 500 }}>
+                    <a href={`/admin/dashboard/tenant/${t.id}`} style={{ color: "#2563eb", textDecoration: "none", cursor: "pointer" }}>
+                      {t.name}
+                    </a>
+                  </td>
                   <td>
                     <span style={badgeStyle(t.plan === "pro" ? "#8b5cf6" : t.plan === "prepaid" ? "#f59e0b" : "#6b7280")}>
                       {t.plan}
