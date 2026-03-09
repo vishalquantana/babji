@@ -53,6 +53,7 @@ async function main() {
   const skillRequests = new SkillRequestManager(db);
 
   // Admin notifier for skill requests
+  let adminNotifier: AdminNotifier | undefined;
   if (config.adminBot.enabled) {
     const jiraConfig = config.jira.enabled ? {
       host: config.jira.host,
@@ -60,12 +61,12 @@ async function main() {
       apiToken: config.jira.apiToken,
       projectKey: config.jira.projectKey,
     } : undefined;
-    const adminNotifier = new AdminNotifier(config.adminBot.botToken, config.adminBot.chatId, jiraConfig);
+    adminNotifier = new AdminNotifier(config.adminBot.botToken, config.adminBot.chatId, jiraConfig);
     skillRequests.onCreated(async (tenantId, skillName, context) => {
       const tenant = await db.query.tenants.findFirst({
         where: eq(schema.tenants.id, tenantId),
       });
-      await adminNotifier.notifySkillRequest(
+      await adminNotifier!.notifySkillRequest(
         tenant?.name || tenantId,
         skillName,
         context,
@@ -140,6 +141,7 @@ async function main() {
       dataforseoLogin: config.people.dataforseoLogin,
       dataforseoPassword: config.people.dataforseoPassword,
     } : undefined,
+    adminNotifier,
   });
   jobRunner.start();
 

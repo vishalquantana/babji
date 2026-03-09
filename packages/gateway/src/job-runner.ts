@@ -10,6 +10,7 @@ import type { SkillDefinition } from "@babji/types";
 import type { ChannelAdapter } from "./adapters/types.js";
 import { ensureValidToken } from "./token-refresh.js";
 import { logger } from "./logger.js";
+import { AdminNotifier } from "./admin-notifier.js";
 import { MeetingBriefingService } from "./meeting-briefing.js";
 
 /** Converts a local time string like "07:30" + IANA timezone to the next UTC timestamp for that local time */
@@ -108,6 +109,7 @@ export interface JobRunnerDeps {
     dataforseoLogin: string;
     dataforseoPassword: string;
   };
+  adminNotifier?: AdminNotifier;
 }
 
 export class JobRunner {
@@ -178,6 +180,9 @@ export class JobRunner {
         break;
       case "meeting_briefing":
         await this.runMeetingBriefing(job);
+        break;
+      case "profile_scan":
+        await this.runProfileScan(job);
         break;
       default:
         logger.warn({ jobType: job.jobType }, "Unknown job type, skipping");
@@ -351,6 +356,31 @@ export class JobRunner {
               logger.info({ tenantId, externals: totalExternals }, "Suggested meeting briefings to tenant");
             }
           }
+        }
+
+        // Schedule evening profile scan for tomorrow's meetings
+        try {
+          const existingScan = await this.deps.db.query.scheduledJobs.findFirst({
+            where: and(
+              eq(schema.scheduledJobs.tenantId, tenantId),
+              eq(schema.scheduledJobs.jobType, "profile_scan"),
+              eq(schema.scheduledJobs.status, "active"),
+            ),
+          });
+
+          if (!existingScan) {
+            const scanTime = nextUtcForLocalTime("18:00", timezone);
+            await this.deps.db.insert(schema.scheduledJobs).values({
+              tenantId,
+              jobType: "profile_scan",
+              scheduleType: "once",
+              scheduledAt: scanTime,
+              payload: { tenantDomain: tenantDomain },
+            });
+            logger.info({ tenantId, scanTime: scanTime.toISOString() }, "Scheduled evening profile scan");
+          }
+        } catch (err) {
+          logger.error({ err, tenantId }, "Failed to schedule profile scan");
         }
       }
     } catch (err) {
@@ -678,6 +708,114 @@ export class JobRunner {
     }
 
     // Mark as completed
+    await this.deps.db.update(schema.scheduledJobs)
+      .set({ status: "completed", lastRunAt: new Date() })
+      .where(eq(schema.scheduledJobs.id, job.id));
+  }
+
+  private async runProfileScan(job: typeof schema.scheduledJobs.$inferSelect): Promise<void> {
+    const tenantId = job.tenantId;
+    const payload = job.payload as { tenantDomain?: string } | null;
+
+    if (!payload?.tenantDomain || !this.deps.peopleConfig) {
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "failed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      return;
+    }
+
+    const tenant = await this.deps.db.query.tenants.findFirst({
+      where: eq(schema.tenants.id, tenantId),
+    });
+    if (!tenant) {
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "completed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      return;
+    }
+
+    const timezone = tenant.timezone || "UTC";
+    const tokenResult = await ensureValidToken(tenantId, "google_calendar", this.deps.vault, this.deps.db);
+    if (!tokenResult || tokenResult.status === "expired") {
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "completed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      return;
+    }
+
+    // Fetch TOMORROW's events
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit",
+    });
+    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    const tomorrowStr = formatter.format(tomorrow);
+    const dayAfter = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+    const dayAfterStr = formatter.format(dayAfter);
+
+    const timeMinISO = new Date(`${tomorrowStr}T00:00:00+00:00`).toISOString();
+    const timeMaxISO = new Date(`${dayAfterStr}T00:00:00+00:00`).toISOString();
+
+    try {
+      const calHandler = new GoogleCalendarHandler(tokenResult.accessToken);
+      const result = await calHandler.execute("list_events", {
+        time_min: timeMinISO,
+        time_max: timeMaxISO,
+        max_results: 50,
+      }) as { events: Array<Record<string, unknown>>; count: number };
+
+      const briefingService = new MeetingBriefingService({
+        db: this.deps.db, vault: this.deps.vault, llm: this.deps.llm,
+        memory: this.deps.memory, availableSkills: this.deps.availableSkills,
+        peopleConfig: this.deps.peopleConfig!,
+      });
+
+      const meetings = briefingService.extractExternalAttendees(
+        result.events, payload.tenantDomain,
+      );
+
+      // Research new attendees not yet in profile_directory
+      const newProfiles: Array<{ email: string; displayName: string; meeting: string; tenantName: string }> = [];
+      let researchCount = 0;
+      const MAX_NEW_PER_SCAN = 20;
+
+      for (const meeting of meetings) {
+        for (const attendee of meeting.attendees) {
+          if (researchCount >= MAX_NEW_PER_SCAN) break;
+
+          const normalizedEmail = attendee.email.toLowerCase();
+          const existing = await this.deps.db.query.profileDirectory.findFirst({
+            where: eq(schema.profileDirectory.email, normalizedEmail),
+          });
+
+          if (existing) continue; // Already in directory
+
+          // Research and insert (researchAttendee handles the upsert)
+          await briefingService.researchAttendee(
+            attendee.email, attendee.displayName, tenantId,
+          );
+          researchCount++;
+
+          newProfiles.push({
+            email: attendee.email,
+            displayName: attendee.displayName,
+            meeting: meeting.summary,
+            tenantName: tenant.name,
+          });
+        }
+        if (researchCount >= MAX_NEW_PER_SCAN) break;
+      }
+
+      // Notify admin of new profiles
+      if (newProfiles.length > 0 && this.deps.adminNotifier) {
+        await this.deps.adminNotifier.notifyNewProfiles(newProfiles, tomorrowStr);
+      }
+
+      logger.info({ tenantId, newProfiles: newProfiles.length }, "Profile scan completed");
+    } catch (err) {
+      logger.error({ err, tenantId }, "Profile scan failed");
+    }
+
     await this.deps.db.update(schema.scheduledJobs)
       .set({ status: "completed", lastRunAt: new Date() })
       .where(eq(schema.scheduledJobs.id, job.id));

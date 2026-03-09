@@ -49,6 +49,24 @@ export class AdminNotifier {
     await this.notify(lines.join("\n"));
   }
 
+  async notifyNewProfiles(
+    profiles: Array<{ email: string; displayName: string; meeting: string; tenantName: string }>,
+    dateStr: string,
+  ): Promise<void> {
+    const lines = [`New meeting attendees discovered (${dateStr}):\n`];
+
+    for (let i = 0; i < profiles.length; i++) {
+      const p = profiles[i];
+      lines.push(`${i + 1}. ${p.email} -> ${p.displayName}`);
+      lines.push(`   Meeting: "${p.meeting}" (for ${p.tenantName})`);
+    }
+
+    lines.push("");
+    lines.push("Review & correct: babji.quantana.top/admin -> Profile Directory");
+
+    await this.notify(lines.join("\n"));
+  }
+
   private async createJiraTicket(tenantName: string, skillName: string, context: string): Promise<string | null> {
     if (!this.jira) return null;
 
