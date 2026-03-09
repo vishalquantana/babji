@@ -168,6 +168,10 @@ Tests cover: message normalizer, rate limiter, tenant resolver, onboarding, e2e 
 - Shows: tenants, service connections, skill requests, recent audit log
 - Auth: cookie-based (`babji_admin` cookie with SHA-256 hash)
 
+## Changelog
+
+All technical changes MUST be logged in `CHANGELOG.md` in the project root. After every commit or deploy, append an entry with the date, what changed, which files were touched, and whether it's been deployed. This avoids re-deploying or losing track of what's live vs pending.
+
 ## Common Issues
 - **Gateway not loading .env**: Must source `.env` before starting. Use `start-gateway.sh` or `set -a && source .env && set +a`
 - **"I ran out of thinking steps"**: Brain hitting max turns. Check tool result sizes, ensure truncation is working
