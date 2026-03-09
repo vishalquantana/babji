@@ -212,6 +212,7 @@ export class MessageHandler {
         skills: this.deps.availableSkills,
         connections: connectedProviders,
         userName: tenant.name,
+        timezone: tenant.timezone ?? "UTC",
       });
 
       // Create per-request Brain with the tenant's ToolExecutor

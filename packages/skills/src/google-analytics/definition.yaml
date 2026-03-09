@@ -1,0 +1,113 @@
+name: google_analytics
+display_name: Google Analytics
+description: View website traffic, audience demographics, conversions, acquisition channels, and real-time data from Google Analytics 4
+requires_auth:
+  provider: google_analytics
+  scopes:
+    - https://www.googleapis.com/auth/analytics.readonly
+    - https://www.googleapis.com/auth/analytics.manage.users.readonly
+actions:
+  - name: list_accounts
+    description: List all Google Analytics accounts and their GA4 properties
+    parameters: {}
+  - name: get_traffic_overview
+    description: Get overall traffic metrics — sessions, users, page views, bounce rate, avg session duration
+    parameters:
+      property_id:
+        type: string
+        required: true
+        description: GA4 property ID (numeric, e.g. "123456789")
+      start_date:
+        type: string
+        description: Start date (YYYY-MM-DD or relative like "28daysAgo"). Defaults to 28daysAgo
+      end_date:
+        type: string
+        description: End date (YYYY-MM-DD or "today"). Defaults to today
+  - name: get_traffic_sources
+    description: Get traffic breakdown by source/medium (organic, paid, social, direct, referral)
+    parameters:
+      property_id:
+        type: string
+        required: true
+        description: GA4 property ID
+      start_date:
+        type: string
+        description: Start date (YYYY-MM-DD or relative). Defaults to 28daysAgo
+      end_date:
+        type: string
+        description: End date (YYYY-MM-DD or "today"). Defaults to today
+      max_results:
+        type: number
+        default: 20
+        description: Maximum sources to return (1-50)
+  - name: get_top_pages
+    description: Get most visited pages with page views, time on page, and bounce rate
+    parameters:
+      property_id:
+        type: string
+        required: true
+        description: GA4 property ID
+      start_date:
+        type: string
+        description: Start date (YYYY-MM-DD or relative). Defaults to 28daysAgo
+      end_date:
+        type: string
+        description: End date (YYYY-MM-DD or "today"). Defaults to today
+      max_results:
+        type: number
+        default: 20
+        description: Maximum pages to return (1-50)
+  - name: get_conversions
+    description: Get conversion events with counts and values over a date range
+    parameters:
+      property_id:
+        type: string
+        required: true
+        description: GA4 property ID
+      start_date:
+        type: string
+        description: Start date (YYYY-MM-DD or relative). Defaults to 28daysAgo
+      end_date:
+        type: string
+        description: End date (YYYY-MM-DD or "today"). Defaults to today
+      event_names:
+        type: array
+        description: Filter to specific conversion event names. If omitted, returns all events
+  - name: get_audience_demographics
+    description: Get user breakdown by country, city, and device category
+    parameters:
+      property_id:
+        type: string
+        required: true
+        description: GA4 property ID
+      start_date:
+        type: string
+        description: Start date (YYYY-MM-DD or relative). Defaults to 28daysAgo
+      end_date:
+        type: string
+        description: End date (YYYY-MM-DD or "today"). Defaults to today
+  - name: get_realtime_report
+    description: Get real-time data — active users right now, top pages, and traffic sources
+    parameters:
+      property_id:
+        type: string
+        required: true
+        description: GA4 property ID
+  - name: get_acquisition_report
+    description: Get new vs returning users, acquisition channels, and first user source/medium
+    parameters:
+      property_id:
+        type: string
+        required: true
+        description: GA4 property ID
+      start_date:
+        type: string
+        description: Start date (YYYY-MM-DD or relative). Defaults to 28daysAgo
+      end_date:
+        type: string
+        description: End date (YYYY-MM-DD or "today"). Defaults to today
+      max_results:
+        type: number
+        default: 20
+        description: Maximum channels to return (1-50)
+credits_per_action: 1

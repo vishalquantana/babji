@@ -1,0 +1,22 @@
+{"role":"user","content":"can you check my mail","timestamp":"2026-03-07T04:25:19.391Z"}
+{"role":"assistant","content":"I'm having trouble thinking right now. Please try again in a moment.","timestamp":"2026-03-07T04:25:21.164Z"}
+{"role":"user","content":"hey what can you do?","timestamp":"2026-03-07T04:25:39.962Z"}
+{"role":"assistant","content":"I'm having trouble thinking right now. Please try again in a moment.","timestamp":"2026-03-07T04:25:41.009Z"}
+{"role":"user","content":"hey what can do you","timestamp":"2026-03-07T04:27:44.956Z"}
+{"role":"assistant","content":"I'm having trouble thinking right now. Please try again in a moment.","timestamp":"2026-03-07T04:27:46.357Z"}
+{"role":"user","content":"hey what can you do","timestamp":"2026-03-07T04:28:45.793Z"}
+{"role":"assistant","content":"I'm having trouble thinking right now. Please try again in a moment.","timestamp":"2026-03-07T04:28:47.796Z"}
+{"role":"user","content":"hey what can you do","timestamp":"2026-03-07T04:29:41.818Z"}
+{"role":"assistant","content":"Hey! I'm Babji, your new digital butler. 🎩 \n\nI'm here to handle the heavy lifting—managing your inbox, sorting your schedule, and keeping your business running smooth. \n\nRight now, I'm still getting settled, so I haven't connected to any of your services yet. Want to hook up your email or calendar so I can start helping out? \n\nJust say the word, and if it’s something new, I’ll check with my teacher to learn the ropes! ⚡️","timestamp":"2026-03-07T04:29:47.835Z"}
+{"role":"user","content":"yes connect my email","timestamp":"2026-03-07T04:29:58.901Z"}
+{"role":"assistant","content":"Let's get that sorted! 📬\n\nTo get started, which email provider do you use? Once we're hooked up, I can start clearing out the noise for you. \n\nJust let me know if it's **Gmail** or **Outlook** and I'll send over the link to get us synced! ⚡️","timestamp":"2026-03-07T04:30:02.405Z"}
+{"role":"user","content":"its gmail","timestamp":"2026-03-07T04:30:19.805Z"}
+{"role":"assistant","content":"Perfect! Gmail it is. 📩\n\nClick the link below to give me the keys to the kingdom so I can start helping you out:\n\n[Connect your Gmail to Babji](https://accounts.google.com/o/oauth2/v2/auth)\n\nOnce you've done that, let me know and I'll start checking for anything urgent! ⚡️🎒","timestamp":"2026-03-07T04:30:22.808Z"}
+{"role":"user","content":"connect to my email","timestamp":"2026-03-07T04:51:09.454Z"}
+{"role":"assistant","content":"I'm having trouble thinking right now. Please try again in a moment.","timestamp":"2026-03-07T04:51:10.394Z"}
+{"role":"user","content":"isntead of jsut failing can we show a short diagnosis message","timestamp":"2026-03-07T04:51:54.774Z"}
+{"role":"assistant","content":"I'm having trouble thinking right now. Please try again in a moment.","timestamp":"2026-03-07T04:51:55.351Z"}
+{"role":"user","content":"find actual reddit thrad","timestamp":"2026-03-07T07:13:18.551Z"}
+{"role":"assistant","content":"Ooh, a Reddit deep dive! 🕵️‍♂️\n\nI actually don't have the skill to search Reddit just yet. I'm mostly focused on your inbox and schedule for now. \n\nLet me **check with my teacher** to see if I can learn how to fetch those threads for you. In the meantime, is there anything else on your plate I can help with? ⚡️🎒","timestamp":"2026-03-07T07:13:22.533Z"}
+{"role":"user","content":"can you write a new email to vishal.quantana@gmail.com asking for what plans on sunday?","timestamp":"2026-03-07T07:28:00.583Z"}
+{"role":"assistant","content":"I’d be happy to send that over to Vishal! 📧\n\nHowever, I haven't quite got the keys to your inbox yet. To let me send emails for you, we need to get your Gmail linked up first. \n\nJust say **\"connect gmail\"** and I'll send you the link to get us synced. Once that's done, I'll fire off that message about Sunday plans immediately! ⚡️🎒","timestamp":"2026-03-07T07:28:05.198Z"}

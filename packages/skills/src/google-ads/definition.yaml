@@ -1,13 +1,13 @@
 name: google_ads
 display_name: Google Ads
-description: Manage Google Ads campaigns, view reports, and update budgets
+description: Manage Google Ads campaigns, view performance reports, control budgets, and get audience insights
 requires_auth:
-  provider: google
+  provider: google_ads
   scopes:
     - https://www.googleapis.com/auth/adwords
 actions:
   - name: list_campaigns
-    description: List all campaigns in the account
+    description: List all campaigns in the account with status and budget
     parameters:
       customer_id:
         type: string
@@ -16,8 +16,9 @@ actions:
       max_results:
         type: number
         default: 20
+        description: Maximum campaigns to return (1-100)
   - name: get_campaign_report
-    description: Get performance report for a campaign
+    description: Get performance metrics (impressions, clicks, cost, conversions, CTR) for a campaign over a date range
     parameters:
       customer_id:
         type: string
@@ -26,6 +27,7 @@ actions:
       campaign_id:
         type: string
         required: true
+        description: Campaign ID (numeric)
       start_date:
         type: string
         required: true
@@ -34,6 +36,48 @@ actions:
         type: string
         required: true
         description: End date in YYYY-MM-DD format
+  - name: get_ad_group_report
+    description: Get performance breakdown by ad group within a campaign
+    parameters:
+      customer_id:
+        type: string
+        required: true
+        description: Google Ads customer ID (without dashes)
+      campaign_id:
+        type: string
+        required: true
+        description: Campaign ID (numeric)
+      start_date:
+        type: string
+        required: true
+        description: Start date in YYYY-MM-DD format
+      end_date:
+        type: string
+        required: true
+        description: End date in YYYY-MM-DD format
+  - name: get_keyword_report
+    description: Get keyword performance and search term data for a campaign
+    parameters:
+      customer_id:
+        type: string
+        required: true
+        description: Google Ads customer ID (without dashes)
+      campaign_id:
+        type: string
+        required: true
+        description: Campaign ID (numeric)
+      start_date:
+        type: string
+        required: true
+        description: Start date in YYYY-MM-DD format
+      end_date:
+        type: string
+        required: true
+        description: End date in YYYY-MM-DD format
+      max_results:
+        type: number
+        default: 50
+        description: Maximum keywords to return (1-100)
   - name: update_budget
     description: Update the daily budget for a campaign
     parameters:
@@ -44,8 +88,50 @@ actions:
       campaign_id:
         type: string
         required: true
+        description: Campaign ID (numeric)
       budget_amount_micros:
         type: number
         required: true
         description: New daily budget in micros (e.g., 5000000 = $5.00)
+  - name: pause_campaign
+    description: Pause a running campaign
+    parameters:
+      customer_id:
+        type: string
+        required: true
+        description: Google Ads customer ID (without dashes)
+      campaign_id:
+        type: string
+        required: true
+        description: Campaign ID (numeric)
+  - name: enable_campaign
+    description: Re-enable a paused campaign
+    parameters:
+      customer_id:
+        type: string
+        required: true
+        description: Google Ads customer ID (without dashes)
+      campaign_id:
+        type: string
+        required: true
+        description: Campaign ID (numeric)
+  - name: get_audience_insights
+    description: Get audience demographics (gender, age, device) and performance breakdown for a campaign
+    parameters:
+      customer_id:
+        type: string
+        required: true
+        description: Google Ads customer ID (without dashes)
+      campaign_id:
+        type: string
+        required: true
+        description: Campaign ID (numeric)
+      start_date:
+        type: string
+        required: true
+        description: Start date in YYYY-MM-DD format
+      end_date:
+        type: string
+        required: true
+        description: End date in YYYY-MM-DD format
 credits_per_action: 1

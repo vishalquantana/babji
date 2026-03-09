@@ -4,6 +4,7 @@ import { schema } from "@babji/db";
 import type { MemoryManager } from "@babji/memory";
 import type { CreditLedger } from "@babji/credits";
 import { randomUUID } from "node:crypto";
+import { timezoneFromPhone } from "./phone-timezone.js";
 
 export interface OnboardingDeps {
   db: Database;
@@ -41,14 +42,18 @@ export class OnboardingHandler {
       const tenantId = randomUUID();
       const name = trimmed;
 
+      // Detect timezone from phone country code (WhatsApp users)
+      const phone = channel === "whatsapp" ? message.sender : null;
+      const detectedTz = timezoneFromPhone(phone);
+
       // Create tenant in DB
       await this.deps.db.insert(schema.tenants).values({
         id: tenantId,
         name,
-        phone: channel === "whatsapp" ? message.sender : null,
+        phone,
         telegramUserId: channel === "telegram" ? message.sender : null,
         plan: "free",
-        timezone: "UTC", // default — can be changed later
+        timezone: detectedTz ?? "UTC",
         containerStatus: "provisioning",
       });
 

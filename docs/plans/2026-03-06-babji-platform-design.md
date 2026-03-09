@@ -14,11 +14,11 @@ The architecture is inspired by OpenClaw's five-component model (Gateway, Brain,
 
 - **Approach:** Custom build borrowing patterns/code from OpenClaw (MIT licensed), not a fork
 - **WhatsApp:** Baileys (unofficial API), single Babji-owned number, all clients message that number
-- **Telegram:** Bot API via grammy/telegraf, single @BabjiBot
-- **LLM:** Multi-model (Claude + GPT-4o + Gemini) with fallback chain
+- **Telegram:** Bot API via grammy/telegraf, single @BabjiByQuantanaBot
+- **LLM:** Multi-model (Gemini 3.1 Flash Lite and Gemini 3.0 Flash Preview) with fallback chain
 - **Isolation:** Docker container per tenant
 - **Skill approval:** Platform operator (centralized, curated)
-- **OAuth:** Own portal at auth.babji.ai
+- **OAuth:** Own portal at balaji.quantana.top
 - **Credits:** 5 free/day + prepaid packs (100/200) + subscription (500/month)
 - **V1 integrations:** Gmail, Calendar, Contacts, Google Ads, Meta Ads, Instagram, Facebook, LinkedIn, X
 

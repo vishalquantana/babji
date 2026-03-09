@@ -6,6 +6,7 @@ interface PromptContext {
   skills: SkillDefinition[];
   connections: string[];
   userName?: string;
+  timezone?: string;
 }
 
 export class PromptBuilder {
@@ -13,6 +14,13 @@ export class PromptBuilder {
     const parts: string[] = [];
 
     parts.push(ctx.soul);
+    parts.push("");
+    const tz = ctx.timezone && ctx.timezone !== "UTC" ? ctx.timezone : "UTC";
+    parts.push(`## Current date and time`);
+    parts.push(new Date().toLocaleString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: tz, timeZoneName: "short" }));
+    if (tz === "UTC") {
+      parts.push("NOTE: The client's timezone is not yet known. In your FIRST reply to a new conversation, casually ask what city or country they are in so you can show times correctly. Keep it brief and natural, e.g. 'By the way, which city are you in? Just so I get the times right for you.' Do NOT ask if you already know from memory.");
+    }
     parts.push("");
     if (ctx.userName) {
       parts.push(`## Client identity`);
