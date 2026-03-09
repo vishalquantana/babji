@@ -6,6 +6,11 @@ All notable changes to Babji are documented here. Each entry notes whether the c
 
 ## 2026-03-09
 
+### Google Ads developer token as server-side env var [DEPLOYED]
+- **What:** Moved Google Ads developer token from per-tenant vault to server-side env var `GOOGLE_ADS_DEVELOPER_TOKEN`. The developer token is an app-level credential, not per-user.
+- **Files:** `packages/gateway/src/config.ts`, `packages/gateway/src/message-handler.ts`, `packages/gateway/src/index.ts`
+- **Env vars added:** `GOOGLE_ADS_DEVELOPER_TOKEN`
+
 ### Conversational disconnect prompt for unconnected services [DEPLOYED]
 - **What:** Changed the system prompt for unconnected services from a blunt "not connected, type connect X" to a 3-step conversational flow: acknowledge goal, explain what Babji can do once connected, offer to set it up naturally.
 - **Files:** `packages/agent/src/prompt-builder.ts`

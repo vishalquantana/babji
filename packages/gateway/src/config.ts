@@ -26,6 +26,7 @@ export interface GatewayConfig {
     apiToken: string;
     projectKey: string;
   };
+  googleAdsDeveloperToken: string;
   people: {
     enabled: boolean;
     scrapinApiKey: string;
@@ -65,6 +66,7 @@ export function loadConfig(): GatewayConfig {
       apiToken: process.env.JIRA_API_TOKEN || "",
       projectKey: process.env.JIRA_PROJECT_KEY || "BAB",
     },
+    googleAdsDeveloperToken: process.env.GOOGLE_ADS_DEVELOPER_TOKEN || "",
     people: {
       enabled: !!process.env.SCRAPIN_API_KEY && !!process.env.DATAFORSEO_LOGIN,
       scrapinApiKey: process.env.SCRAPIN_API_KEY || "",

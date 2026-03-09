@@ -93,6 +93,7 @@ async function main() {
     vault,
     oauthPortalUrl: process.env.OAUTH_PORTAL_URL || "https://auth.babji.ai",
     googleClientId: process.env.GOOGLE_CLIENT_ID || "",
+    googleAdsDeveloperToken: config.googleAdsDeveloperToken,
     peopleConfig: config.people,
   });
 

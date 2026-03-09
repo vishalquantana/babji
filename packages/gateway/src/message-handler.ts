@@ -99,6 +99,7 @@ export interface MessageHandlerDeps {
   vault: TokenVault;
   oauthPortalUrl: string;
   googleClientId: string;
+  googleAdsDeveloperToken: string;
   peopleConfig?: {
     enabled: boolean;
     scrapinApiKey: string;
@@ -305,9 +306,7 @@ export class MessageHandler {
           toolExecutor.registerSkill("google_calendar", new GoogleCalendarHandler(accessToken));
         }
         if (conn.provider === "google_ads") {
-          const fullToken = await this.deps.vault.retrieve(tenantId, conn.provider) as Record<string, string> | null;
-          const developerToken = fullToken?.developer_token;
-          toolExecutor.registerSkill("google_ads", new GoogleAdsHandler(accessToken, developerToken));
+          toolExecutor.registerSkill("google_ads", new GoogleAdsHandler(accessToken, this.deps.googleAdsDeveloperToken));
         }
         if (conn.provider === "google_analytics") {
           toolExecutor.registerSkill("google_analytics", new GoogleAnalyticsHandler(accessToken));
