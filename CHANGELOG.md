@@ -6,6 +6,14 @@ All notable changes to Babji are documented here. Each entry notes whether the c
 
 ## 2026-03-09
 
+### Admin tenant detail dashboard with conversation logs [DEPLOYED]
+- **What:** Clickable tenant names in admin dashboard open a detail page showing: overview stats, connected services, skill requests (with Complete & Notify), scheduled jobs, todos, activity log, credit transactions, and full conversation history. Conversations are loaded from JSONL session files on disk via a new gateway API endpoint.
+- **Files:** `apps/oauth-portal/src/app/admin/dashboard/tenant/[tenantId]/page.tsx` (new), `apps/oauth-portal/src/app/admin/dashboard/tenant/[tenantId]/client.tsx` (new), `apps/oauth-portal/src/app/api/admin/tenant/[tenantId]/route.ts` (new), `apps/oauth-portal/src/app/admin/dashboard/client.tsx` (clickable names), `packages/gateway/src/server.ts` (sessions endpoint)
+
+### Tool error transparency — prevent LLM confabulation on failures [DEPLOYED]
+- **What:** Three-layer fix for the problem where Babji says "I found nothing" when a tool actually errored (e.g., expired Gmail token → 401). (1) System prompt guardrail telling Brain to never confabulate empty results on errors. (2) Brain formats tool errors with explicit ERROR prefix and anti-confabulation instruction. (3) ToolExecutor detects 401/403/429 patterns and returns actionable messages. (4) Expired OAuth tokens now register stub handlers that return clear "reconnect" messages instead of silently hiding the tool.
+- **Files:** `packages/agent/src/prompt-builder.ts`, `packages/agent/src/brain.ts`, `packages/agent/src/tool-executor.ts`, `packages/gateway/src/message-handler.ts`
+
 ### Skill request "Complete & Notify" — proactive user notification [DEPLOYED]
 - **What:** When an admin marks a skill request as completed, Babji now proactively notifies the user via Telegram with a Brain-crafted conversational message ("Hey, remember when you asked about X? I can do that now!"). Added "Complete & Notify" button to admin dashboard. Fallback: if the proactive notification fails, the next conversation's system prompt includes the completed request so Brain mentions it naturally.
 - **Files:** `packages/db/src/schema.ts` (added `notifiedAt` column), `packages/gateway/src/server.ts` (new `/api/notify-skill-ready` endpoint), `apps/oauth-portal/src/app/api/admin/skill-requests/[requestId]/complete/route.ts` (new), `apps/oauth-portal/src/app/admin/dashboard/client.tsx` (button), `packages/agent/src/prompt-builder.ts` (fallback injection), `packages/gateway/src/message-handler.ts` (query + mark notified)
