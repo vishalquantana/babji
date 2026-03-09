@@ -79,6 +79,7 @@ function timeAgo(dateStr: string): string {
 export function DashboardClient() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState("");
+  const [completingIds, setCompletingIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetch("/api/admin/data")
@@ -107,6 +108,29 @@ export function DashboardClient() {
   const tenantNames: Record<string, string> = {};
   for (const t of data.tenants) {
     tenantNames[t.id] = t.name;
+  }
+
+  async function handleCompleteSkillRequest(requestId: string) {
+    setCompletingIds((prev) => new Set(prev).add(requestId));
+    try {
+      const res = await fetch(`/api/admin/skill-requests/${requestId}/complete`, { method: "POST" });
+      if (!res.ok) throw new Error("Failed");
+      // Update local state to reflect completion
+      setData((prev) => prev ? {
+        ...prev,
+        skillRequests: prev.skillRequests.map((sr) =>
+          sr.id === requestId ? { ...sr, status: "completed" } : sr
+        ),
+      } : prev);
+    } catch {
+      alert("Failed to complete skill request");
+    } finally {
+      setCompletingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(requestId);
+        return next;
+      });
+    }
   }
 
   return (
@@ -202,6 +226,7 @@ export function DashboardClient() {
                 <th>Context</th>
                 <th>Status</th>
                 <th>Requested</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -222,6 +247,26 @@ export function DashboardClient() {
                     </span>
                   </td>
                   <td style={{ color: "#888" }}>{timeAgo(sr.createdAt)}</td>
+                  <td>
+                    {(sr.status === "pending" || sr.status === "in_progress") && (
+                      <button
+                        onClick={() => handleCompleteSkillRequest(sr.id)}
+                        disabled={completingIds.has(sr.id)}
+                        style={{
+                          padding: "4px 12px",
+                          borderRadius: 6,
+                          border: "none",
+                          backgroundColor: completingIds.has(sr.id) ? "#9ca3af" : "#10b981",
+                          color: "white",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor: completingIds.has(sr.id) ? "default" : "pointer",
+                        }}
+                      >
+                        {completingIds.has(sr.id) ? "Sending..." : "Complete & Notify"}
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
