@@ -682,7 +682,7 @@ const checkWithTeacherSkill: SkillDefinition = {
     },
     {
       name: "add_task",
-      description: "Add a new todo or reminder for the user. Use smart defaults for remind_before: gift/purchase tasks get 5-7 days, preparation tasks 2-3 days, meetings 1 day, general deadlines 1 day. Always confirm the reminder timing with the user after creating.",
+      description: "Add a new todo or reminder for the user. Use smart defaults for remind_before: gift/purchase tasks get 5-7 days, preparation tasks 2-3 days, meetings 1 day, general deadlines 1 day. Always confirm the reminder timing with the user after creating. For recurring reminders (e.g. 'remind me every day at 9:20 AM'), use the recurrence and reminder_time parameters instead of due_date/remind_before.",
       parameters: {
         title: {
           type: "string",
@@ -708,6 +708,16 @@ const checkWithTeacherSkill: SkillDefinition = {
           type: "string",
           required: false,
           description: "Additional context or details about the task",
+        },
+        recurrence: {
+          type: "string",
+          required: false,
+          description: "For recurring reminders: 'daily', 'weekdays' (Mon-Fri), 'weekly', 'monthly', or 'yearly'. When set, reminder_time is used instead of due_date/remind_before.",
+        },
+        reminder_time: {
+          type: "string",
+          required: false,
+          description: "Time of day for recurring reminders in HH:MM 24-hour format (e.g. '09:20', '14:00'). Defaults to '09:00'. Only used when recurrence is set.",
         },
       },
     },
@@ -766,6 +776,16 @@ const checkWithTeacherSkill: SkillDefinition = {
           type: "string",
           required: false,
           description: "New notes",
+        },
+        recurrence: {
+          type: "string",
+          required: false,
+          description: "Change to recurring: 'daily', 'weekdays', 'weekly', 'monthly', 'yearly'. Set to 'none' to stop recurrence.",
+        },
+        reminder_time: {
+          type: "string",
+          required: false,
+          description: "New time for recurring reminder in HH:MM format (e.g. '09:20'). Only used with recurrence.",
         },
       },
     },
