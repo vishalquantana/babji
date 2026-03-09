@@ -30,6 +30,9 @@ export const tenants = pgTable(
     containerStatus: varchar("container_status", { length: 20 })
       .notNull()
       .default("pending"),
+    onboardingPhase: varchar("onboarding_phase", { length: 20 })
+      .notNull()
+      .default("name"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     lastActiveAt: timestamp("last_active_at").notNull().defaultNow(),
   },
