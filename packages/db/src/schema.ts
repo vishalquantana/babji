@@ -142,6 +142,33 @@ export const todos = pgTable(
   ]
 );
 
+export const profileStatusEnum = pgEnum("profile_status", [
+  "pending",
+  "verified",
+  "corrected",
+  "failed",
+]);
+
+export const profileDirectory = pgTable(
+  "profile_directory",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    email: varchar("email", { length: 255 }).notNull().unique(),
+    displayName: varchar("display_name", { length: 255 }),
+    linkedinUrl: text("linkedin_url"),
+    scrapedData: jsonb("scraped_data").$type<Record<string, unknown>>(),
+    status: profileStatusEnum("status").notNull().default("pending"),
+    scrapedAt: timestamp("scraped_at"),
+    verifiedBy: varchar("verified_by", { length: 100 }),
+    verifiedAt: timestamp("verified_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_profile_email").on(table.email),
+    index("idx_profile_status").on(table.status),
+  ]
+);
+
 export const jobStatusEnum = pgEnum("job_status", [
   "active",
   "paused",
