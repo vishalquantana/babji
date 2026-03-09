@@ -6,6 +6,11 @@ All notable changes to Babji are documented here. Each entry notes whether the c
 
 ## 2026-03-09
 
+### Recurring reminders (BAB-4) [DEPLOYED]
+- **What:** Added recurring reminders. Users can say "remind me every day at 9:20 AM to check orders" and the system creates a repeating scheduled job. Supports daily, weekdays (Mon-Fri), weekly, monthly, and yearly recurrence. JobRunner reschedules instead of completing for recurring jobs. list_tasks shows recurrence info. PromptBuilder guides Brain on when to use recurring vs single reminders. No schema changes -- uses existing scheduledJobs infrastructure.
+- **Files:** `packages/skills/src/registry.ts`, `packages/skills/src/todos/handler.ts`, `packages/gateway/src/job-runner.ts`, `packages/agent/src/prompt-builder.ts`
+- **Jira:** BAB-4 (Done)
+
 ### First-time user experience revamp [DEPLOYED]
 - **What:** Redesigned onboarding flow for zero-digital-savvy users. New flow: name -> "what do you do?" -> tailored demo suggestions -> first Brain interaction -> gentle service introduction. Phone number deferred to when timezone matters. Credits explained on first use, not upfront. Industry-specific suggestions (9 industries + default) based on user's stated role. Cleaned up SOUL.md template to remove premature credits/juice references.
 - **Files:** `packages/gateway/src/onboarding.ts`, `packages/gateway/src/message-handler.ts`, `packages/agent/src/prompt-builder.ts`, `packages/memory/src/memory-manager.ts`, `packages/db/src/schema.ts`
