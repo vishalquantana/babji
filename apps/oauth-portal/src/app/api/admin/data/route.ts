@@ -14,15 +14,23 @@ export async function GET() {
   const { db, close } = createDb(databaseUrl);
 
   try {
-    const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-    const [tenants, connections, skillRequests, recentAudit, profiles, usageRows, appConfig] = await Promise.all([
+    const [tenants, connections, skillRequests, recentAudit] = await Promise.all([
       db.select().from(schema.tenants).orderBy(desc(schema.tenants.lastActiveAt)),
       db.select().from(schema.serviceConnections).orderBy(desc(schema.serviceConnections.createdAt)),
       db.select().from(schema.skillRequests).orderBy(desc(schema.skillRequests.createdAt)),
       db.select().from(schema.auditLog).orderBy(desc(schema.auditLog.createdAt)).limit(50),
-      db.select().from(schema.profileDirectory).orderBy(desc(schema.profileDirectory.createdAt)),
-      db.execute(sql`
+    ]);
+
+    let profiles: unknown[] = [];
+    try {
+      profiles = await db.select().from(schema.profileDirectory).orderBy(desc(schema.profileDirectory.createdAt));
+    } catch { /* table may not exist */ }
+
+    let usageRows: unknown[] = [];
+    try {
+      usageRows = await db.execute(sql`
         SELECT
           t.name AS tenant_name,
           t.id AS tenant_id,
@@ -39,9 +47,14 @@ export async function GET() {
         WHERE a.created_at >= ${since7d}
         GROUP BY t.id, t.name
         ORDER BY total_tokens DESC
-      `),
-      db.query.appConfig.findFirst(),
-    ]);
+      `);
+    } catch { /* usage query may fail */ }
+
+    let defaultDailyFreeCredits = 100;
+    try {
+      const appConfig = await db.query.appConfig.findFirst();
+      defaultDailyFreeCredits = appConfig?.defaultDailyFreeCredits ?? 100;
+    } catch { /* table may not exist */ }
 
     return NextResponse.json({
       tenants,
@@ -50,7 +63,7 @@ export async function GET() {
       recentAudit,
       profiles,
       usageSummary: usageRows,
-      defaultDailyFreeCredits: appConfig?.defaultDailyFreeCredits ?? 100,
+      defaultDailyFreeCredits,
     });
   } finally {
     await close();

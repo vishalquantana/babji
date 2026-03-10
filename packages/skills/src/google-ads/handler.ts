@@ -110,7 +110,8 @@ export class GoogleAdsHandler implements SkillHandler {
   private async apiRequest(
     method: string,
     url: string,
-    body?: unknown
+    body?: unknown,
+    loginCustomerId?: string,
   ): Promise<unknown> {
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.accessToken}`,
@@ -118,6 +119,9 @@ export class GoogleAdsHandler implements SkillHandler {
     };
     if (this.developerToken) {
       headers["developer-token"] = this.developerToken;
+    }
+    if (loginCustomerId) {
+      headers["login-customer-id"] = loginCustomerId;
     }
 
     const res = await fetch(url, {
@@ -164,7 +168,7 @@ export class GoogleAdsHandler implements SkillHandler {
 
       // Fetch descriptive name for each account
       let testTokenLimited = false;
-      const accounts = await Promise.all(
+      const topAccounts = await Promise.all(
         customerIds.map(async (id: string) => {
           try {
             const info = (await this.apiRequest(
@@ -190,10 +194,41 @@ export class GoogleAdsHandler implements SkillHandler {
         }),
       );
 
+      // For MCC (manager) accounts, discover client accounts underneath
+      const accounts: typeof topAccounts = [];
+      for (const acct of topAccounts) {
+        if (acct.isManager) {
+          try {
+            const clientData = (await this.apiRequest(
+              "POST",
+              `${ADS_API_BASE}/customers/${acct.customerId}/googleAds:searchStream`,
+              { query: "SELECT customer_client.id, customer_client.descriptive_name, customer_client.currency_code, customer_client.manager, customer_client.level FROM customer_client WHERE customer_client.manager = false AND customer_client.level = 1" },
+            )) as any;
+            const clientResults = clientData[0]?.results || clientData.results || [];
+            for (const row of clientResults) {
+              const cc = row.customerClient;
+              accounts.push({
+                customerId: String(cc.id),
+                name: cc.descriptiveName || `Account ${cc.id}`,
+                currencyCode: cc.currencyCode,
+                isManager: false,
+                managerId: acct.customerId,
+                managerName: acct.name,
+              } as any);
+            }
+          } catch {
+            // If we can't list clients, include the MCC itself as fallback
+            accounts.push(acct);
+          }
+        } else {
+          accounts.push(acct);
+        }
+      }
+
       const result: Record<string, unknown> = {
         accounts,
         count: accounts.length,
-        hint: "Present these as a numbered list. Ask the user which account to work with.",
+        hint: "Present these as a numbered list. For accounts with a managerId, pass that as login_customer_id when calling other actions. Ask the user which account to work with.",
       };
 
       if (testTokenLimited) {
@@ -208,17 +243,19 @@ export class GoogleAdsHandler implements SkillHandler {
 
   private async listCampaigns(params: Record<string, unknown>) {
     const customerId = params.customer_id as string;
+    const loginCustomerId = params.login_customer_id as string | undefined;
     this.validateId(customerId, "customer_id");
     const maxResults = Math.min(Math.max((params.max_results as number) || 20, 1), 100);
 
-    const query = `SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, campaign_budget.amount_micros FROM campaign ORDER BY campaign.name LIMIT ${maxResults}`;
+    const query = `SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, campaign_budget.amount_micros FROM campaign WHERE campaign.status != 'REMOVED' ORDER BY campaign.name LIMIT ${maxResults}`;
 
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const data = (await this.apiRequest(
         "POST",
         `${ADS_API_BASE}/customers/${customerId}/googleAds:searchStream`,
-        { query }
+        { query },
+        loginCustomerId,
       )) as any;
 
       const results = data[0]?.results || data.results || [];
@@ -239,6 +276,7 @@ export class GoogleAdsHandler implements SkillHandler {
 
   private async getCampaignReport(params: Record<string, unknown>) {
     const customerId = params.customer_id as string;
+    const loginCustomerId = params.login_customer_id as string | undefined;
     const campaignId = params.campaign_id as string;
     const startDate = params.start_date as string;
     const endDate = params.end_date as string;
@@ -255,7 +293,8 @@ export class GoogleAdsHandler implements SkillHandler {
       const data = (await this.apiRequest(
         "POST",
         `${ADS_API_BASE}/customers/${customerId}/googleAds:searchStream`,
-        { query }
+        { query },
+        loginCustomerId,
       )) as any;
 
       const results = data[0]?.results || data.results || [];
@@ -279,6 +318,7 @@ export class GoogleAdsHandler implements SkillHandler {
 
   private async getAdGroupReport(params: Record<string, unknown>) {
     const customerId = params.customer_id as string;
+    const loginCustomerId = params.login_customer_id as string | undefined;
     const campaignId = params.campaign_id as string;
     const startDate = params.start_date as string;
     const endDate = params.end_date as string;
@@ -295,7 +335,8 @@ export class GoogleAdsHandler implements SkillHandler {
       const data = (await this.apiRequest(
         "POST",
         `${ADS_API_BASE}/customers/${customerId}/googleAds:searchStream`,
-        { query }
+        { query },
+        loginCustomerId,
       )) as any;
 
       const results = data[0]?.results || data.results || [];
@@ -320,6 +361,7 @@ export class GoogleAdsHandler implements SkillHandler {
 
   private async getKeywordReport(params: Record<string, unknown>) {
     const customerId = params.customer_id as string;
+    const loginCustomerId = params.login_customer_id as string | undefined;
     const campaignId = params.campaign_id as string;
     const startDate = params.start_date as string;
     const endDate = params.end_date as string;
@@ -338,7 +380,8 @@ export class GoogleAdsHandler implements SkillHandler {
       const data = (await this.apiRequest(
         "POST",
         `${ADS_API_BASE}/customers/${customerId}/googleAds:searchStream`,
-        { query }
+        { query },
+        loginCustomerId,
       )) as any;
 
       const results = data[0]?.results || data.results || [];
@@ -363,6 +406,7 @@ export class GoogleAdsHandler implements SkillHandler {
 
   private async updateBudget(params: Record<string, unknown>) {
     const customerId = params.customer_id as string;
+    const loginCustomerId = params.login_customer_id as string | undefined;
     const campaignId = params.campaign_id as string;
     const budgetAmountMicros = params.budget_amount_micros as number;
 
@@ -376,7 +420,8 @@ export class GoogleAdsHandler implements SkillHandler {
       const budgetData = (await this.apiRequest(
         "POST",
         `${ADS_API_BASE}/customers/${customerId}/googleAds:searchStream`,
-        { query: budgetQuery }
+        { query: budgetQuery },
+        loginCustomerId,
       )) as any;
 
       const results = budgetData[0]?.results || budgetData.results || [];
@@ -402,7 +447,8 @@ export class GoogleAdsHandler implements SkillHandler {
               updateMask: "amount_micros",
             },
           ],
-        }
+        },
+        loginCustomerId,
       );
 
       return {
@@ -417,6 +463,7 @@ export class GoogleAdsHandler implements SkillHandler {
 
   private async setCampaignStatus(params: Record<string, unknown>, status: "PAUSED" | "ENABLED") {
     const customerId = params.customer_id as string;
+    const loginCustomerId = params.login_customer_id as string | undefined;
     const campaignId = params.campaign_id as string;
 
     this.validateId(customerId, "customer_id");
@@ -438,7 +485,8 @@ export class GoogleAdsHandler implements SkillHandler {
               updateMask: "status",
             },
           ],
-        }
+        },
+        loginCustomerId,
       );
 
       return {
@@ -453,6 +501,7 @@ export class GoogleAdsHandler implements SkillHandler {
 
   private async getAudienceInsights(params: Record<string, unknown>) {
     const customerId = params.customer_id as string;
+    const loginCustomerId = params.login_customer_id as string | undefined;
     const campaignId = params.campaign_id as string;
     const startDate = params.start_date as string;
     const endDate = params.end_date as string;
@@ -473,9 +522,9 @@ export class GoogleAdsHandler implements SkillHandler {
 
     try {
       const [genderData, ageData, deviceData] = await Promise.all([
-        this.apiRequest("POST", `${ADS_API_BASE}/customers/${customerId}/googleAds:searchStream`, { query: genderQuery }),
-        this.apiRequest("POST", `${ADS_API_BASE}/customers/${customerId}/googleAds:searchStream`, { query: ageQuery }),
-        this.apiRequest("POST", `${ADS_API_BASE}/customers/${customerId}/googleAds:searchStream`, { query: deviceQuery }),
+        this.apiRequest("POST", `${ADS_API_BASE}/customers/${customerId}/googleAds:searchStream`, { query: genderQuery }, loginCustomerId),
+        this.apiRequest("POST", `${ADS_API_BASE}/customers/${customerId}/googleAds:searchStream`, { query: ageQuery }, loginCustomerId),
+        this.apiRequest("POST", `${ADS_API_BASE}/customers/${customerId}/googleAds:searchStream`, { query: deviceQuery }, loginCustomerId),
       ]) as any[];
 
       const genderResults = genderData[0]?.results || genderData.results || [];

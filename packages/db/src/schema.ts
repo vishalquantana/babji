@@ -228,6 +228,22 @@ export const auditLog = pgTable(
   ]
 );
 
+export const reports = pgTable(
+  "reports",
+  {
+    id: varchar("id", { length: 12 }).primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    query: text("query").notNull(),
+    filePath: text("file_path").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_reports_tenant").on(table.tenantId),
+  ]
+);
+
 export const generatedImages = pgTable(
   "generated_images",
   {

@@ -1,4 +1,5 @@
 import { eq, and, lte, gte, sql } from "drizzle-orm";
+import { randomBytes } from "node:crypto";
 import type { Database } from "@babji/db";
 import { schema } from "@babji/db";
 import { TokenVault } from "@babji/crypto";
@@ -968,6 +969,18 @@ export class JobRunner {
     await fs.writeFile(reportPath, `# Deep Research: ${query}\n\n_Generated: ${new Date().toISOString()}_\n\n${report}`);
     logger.info({ tenantId, reportPath }, "Saved deep research report to disk");
 
+    // ── Create shareable report link ──
+    const reportId = randomBytes(6).toString("base64url");
+    await this.deps.db.insert(schema.reports).values({
+      id: reportId,
+      tenantId,
+      query,
+      filePath: reportPath,
+    });
+    const portalUrl = process.env.OAUTH_PORTAL_URL || "https://babji.quantana.top";
+    const reportUrl = `${portalUrl}/report/${reportId}`;
+    logger.info({ tenantId, reportUrl }, "Created shareable report link");
+
     // ── Summarize via Brain ──
     const soul = await this.deps.memory.readSoul(tenantId);
     const memoryContent = await this.deps.memory.readMemory(tenantId);
@@ -989,7 +1002,7 @@ export class JobRunner {
       messages: [
         {
           role: "user",
-          content: `Here are the results of the deep research I requested about "${query}":\n\n${truncatedReport}\n\nSummarize this research for me in a clear, conversational way. Include key findings and cite sources where available. Start with "Your deep research on '${query}' is ready!" and end with: "Would you like me to email you the full report? Just share your email address and I'll send it over."`,
+          content: `Here are the results of the deep research I requested about "${query}":\n\n${truncatedReport}\n\nSummarize this research for me in a clear, conversational way. Include key findings and cite sources where available. Start with "Your deep research on '${query}' is ready!" and end with: "Here's the full report: ${reportUrl}\n\nWould you like me to email it to you as well? Just share your email address."`,
         },
       ],
       maxTurns: 1,
@@ -1008,8 +1021,8 @@ export class JobRunner {
       this.deps.usageTracker.logBackgroundJob({ tenantId, jobType: "deep_research", usage: result.usage }).catch(() => {});
     }
 
-    // Store the report path in tenant's memory for follow-up email requests
-    await this.deps.memory.appendMemory(tenantId, `Deep research report on "${query}" saved at ${reportPath}`);
+    // Store the report link in tenant's memory for follow-up email requests
+    await this.deps.memory.appendMemory(tenantId, `Deep research report on "${query}" available at ${reportUrl}`);
   }
 
   private async sendDeepResearchError(

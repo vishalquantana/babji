@@ -6,6 +6,14 @@ All notable changes to Babji are documented here. Each entry notes whether the c
 
 ## 2026-03-10
 
+### Fix: Google Ads not showing live campaigns (BAB-15) [DEPLOYED]
+- **What:** Two bugs in the Google Ads handler: (1) GAQL query had no `WHERE campaign.status != 'REMOVED'` filter, so deleted campaigns were returned alongside active ones. (2) No MCC (Manager account) support — the Quantana account (7754010284) is an MCC with the CUPI client account (9803842268) underneath. Added `login-customer-id` header support to all API requests, updated `list_accounts` to discover client accounts under MCC accounts, and added `login_customer_id` as an optional parameter to all actions in the skill registry.
+- **Files:** `packages/skills/src/google-ads/handler.ts`, `packages/skills/src/registry.ts`
+
+### Add context-hub (chub) as dev-time API reference
+- **What:** Added `@aisuite/chub` CLI as a development reference tool for building new skill handlers. Updated CLAUDE.md with mandatory instruction to check context-hub before writing any new API integration.
+- **Files:** `CLAUDE.md`
+
 ### Image generation skill with Gemini API (BAB-12) [DEPLOYED]
 - **What:** New `image_gen` skill lets users generate images via conversational brief. Two-step flow: (1) `enhance_prompt` — metaprompts the user's brief with their context/memory using lite LLM, shows enhanced prompt for approval, (2) `generate_image` — calls Gemini image API (flash or pro model), uploads PNG to S3, saves metadata to DB. Supports "don't ask me again" preference stored in MEMORY.md. Telegram adapter updated to send photos via `sendPhoto` API (URL or base64 buffer). Images stored on Vultr Object Storage (S3-compatible) for future gallery feature.
 - **Files:** `packages/skills/src/image-gen/` (new: handler.ts, s3.ts, index.ts), `packages/skills/src/registry.ts`, `packages/skills/src/index.ts`, `packages/agent/src/brain.ts` (MediaResult type, base64 stripping), `packages/agent/src/index.ts`, `packages/gateway/src/message-handler.ts`, `packages/gateway/src/config.ts` (S3 config), `packages/gateway/src/index.ts`, `packages/gateway/src/adapters/telegram.ts` (sendPhoto), `packages/db/src/schema.ts` (generated_images table)

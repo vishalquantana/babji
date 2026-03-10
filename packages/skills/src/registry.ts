@@ -284,17 +284,22 @@ const googleAdsSkill: SkillDefinition = {
   actions: [
     {
       name: "list_accounts",
-      description: "List all Google Ads accounts the user has access to. Call this FIRST before any other google_ads action -- it returns account IDs and names so the user can pick which account to work with. No parameters needed.",
+      description: "List all Google Ads accounts the user has access to. Call this FIRST before any other google_ads action -- it returns account IDs and names. For accounts under a manager (MCC), the response includes managerId -- pass that as login_customer_id in all subsequent actions for that account.",
       parameters: {},
     },
     {
       name: "list_campaigns",
-      description: "List all campaigns in the account with status and budget.",
+      description: "List all active/paused campaigns in the account with status and budget. Excluded removed campaigns.",
       parameters: {
         customer_id: {
           type: "string",
           required: true,
           description: "Google Ads customer ID (without dashes)",
+        },
+        login_customer_id: {
+          type: "string",
+          required: false,
+          description: "Manager (MCC) account ID, required when accessing a client account under an MCC. Use the managerId from list_accounts.",
         },
         max_results: {
           type: "number",
@@ -311,6 +316,11 @@ const googleAdsSkill: SkillDefinition = {
           type: "string",
           required: true,
           description: "Google Ads customer ID (without dashes)",
+        },
+        login_customer_id: {
+          type: "string",
+          required: false,
+          description: "Manager (MCC) account ID if accessing via MCC",
         },
         campaign_id: {
           type: "string",
@@ -338,6 +348,11 @@ const googleAdsSkill: SkillDefinition = {
           required: true,
           description: "Google Ads customer ID (without dashes)",
         },
+        login_customer_id: {
+          type: "string",
+          required: false,
+          description: "Manager (MCC) account ID if accessing via MCC",
+        },
         campaign_id: {
           type: "string",
           required: true,
@@ -363,6 +378,11 @@ const googleAdsSkill: SkillDefinition = {
           type: "string",
           required: true,
           description: "Google Ads customer ID (without dashes)",
+        },
+        login_customer_id: {
+          type: "string",
+          required: false,
+          description: "Manager (MCC) account ID if accessing via MCC",
         },
         campaign_id: {
           type: "string",
@@ -395,6 +415,11 @@ const googleAdsSkill: SkillDefinition = {
           required: true,
           description: "Google Ads customer ID (without dashes)",
         },
+        login_customer_id: {
+          type: "string",
+          required: false,
+          description: "Manager (MCC) account ID if accessing via MCC",
+        },
         campaign_id: {
           type: "string",
           required: true,
@@ -416,6 +441,11 @@ const googleAdsSkill: SkillDefinition = {
           required: true,
           description: "Google Ads customer ID (without dashes)",
         },
+        login_customer_id: {
+          type: "string",
+          required: false,
+          description: "Manager (MCC) account ID if accessing via MCC",
+        },
         campaign_id: {
           type: "string",
           required: true,
@@ -432,6 +462,11 @@ const googleAdsSkill: SkillDefinition = {
           required: true,
           description: "Google Ads customer ID (without dashes)",
         },
+        login_customer_id: {
+          type: "string",
+          required: false,
+          description: "Manager (MCC) account ID if accessing via MCC",
+        },
         campaign_id: {
           type: "string",
           required: true,
@@ -447,6 +482,11 @@ const googleAdsSkill: SkillDefinition = {
           type: "string",
           required: true,
           description: "Google Ads customer ID (without dashes)",
+        },
+        login_customer_id: {
+          type: "string",
+          required: false,
+          description: "Manager (MCC) account ID if accessing via MCC",
         },
         campaign_id: {
           type: "string",
