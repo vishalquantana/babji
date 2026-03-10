@@ -9,6 +9,7 @@ interface PromptContext {
   timezone?: string;
   completedSkillRequests?: Array<{ skillName: string; context: string }>;
   dailyFreeCredits?: number;
+  remainingCredits?: number;
 }
 
 export class PromptBuilder {
@@ -117,11 +118,14 @@ export class PromptBuilder {
     parts.push("");
     parts.push("## Credits");
     const dailyFree = ctx.dailyFreeCredits ?? 100;
+    const remaining = ctx.remainingCredits ?? dailyFree;
     parts.push(`Each action (research, email, calendar, etc.) costs 1 credit. The client gets ${dailyFree} free daily credits.`);
+    parts.push(`Current balance: ${remaining} free uses remaining today (out of ${dailyFree}).`);
     parts.push("Do NOT mention credits proactively. Only mention credits when:");
-    parts.push("- The client's balance drops to 2 or fewer -- then say 'Heads up, you have [X] uses left today. They reset tomorrow.'");
+    parts.push(`- The client's balance drops to 2 or fewer -- then say 'Heads up, you have ${remaining} uses left today. They reset tomorrow.'`);
     parts.push("- The client asks about credits, pricing, or how many uses they have");
     parts.push("- The client runs out of credits -- then say 'You have used all your free uses for today. They reset tomorrow.'");
+    parts.push("When the client asks about credits, use the EXACT balance above. NEVER guess or make up a number.");
     parts.push("NEVER call them 'juice' with new users. Say 'free uses' or 'daily uses' instead.");
 
     parts.push("");
