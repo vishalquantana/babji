@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createDb, schema } from "@babji/db";
-import { eq } from "drizzle-orm";
+import { eq, isNull } from "drizzle-orm";
 import { isAdminAuthenticated } from "@/lib/admin-auth";
 
 export async function GET() {
@@ -54,6 +54,12 @@ export async function PUT(request: NextRequest) {
         .insert(schema.appConfig)
         .values({ id: 1, defaultDailyFreeCredits: value });
     }
+    // Update dailyFree for all tenants WITHOUT a per-tenant override
+    await db
+      .update(schema.creditBalances)
+      .set({ dailyFree: value, lastDailyReset: new Date() })
+      .where(isNull(schema.creditBalances.dailyFreeOverride));
+
     return NextResponse.json({ defaultDailyFreeCredits: value });
   } finally {
     await close();

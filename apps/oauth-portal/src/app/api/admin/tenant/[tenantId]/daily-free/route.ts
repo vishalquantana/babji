@@ -31,12 +31,27 @@ export async function PUT(
   const { db, close } = createDb(databaseUrl);
 
   try {
+    // Update the override AND the actual balance so it takes effect immediately
+    const newOverride = value === null ? null : Number(value);
+    let newDailyFree: number;
+    if (newOverride != null) {
+      newDailyFree = newOverride;
+    } else {
+      // Clearing override: reset to global default
+      const config = await db.query.appConfig.findFirst();
+      newDailyFree = config?.defaultDailyFreeCredits ?? 100;
+    }
+
     await db
       .update(schema.creditBalances)
-      .set({ dailyFreeOverride: value === null ? null : Number(value) })
+      .set({
+        dailyFreeOverride: newOverride,
+        dailyFree: newDailyFree,
+        lastDailyReset: new Date(),
+      })
       .where(eq(schema.creditBalances.tenantId, tenantId));
 
-    return NextResponse.json({ tenantId, dailyFreeOverride: value });
+    return NextResponse.json({ tenantId, dailyFreeOverride: value, dailyFree: newDailyFree });
   } finally {
     await close();
   }
