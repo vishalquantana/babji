@@ -227,3 +227,23 @@ export const auditLog = pgTable(
     index("idx_audit_action_created").on(table.action, table.createdAt),
   ]
 );
+
+export const generatedImages = pgTable(
+  "generated_images",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    s3Key: text("s3_key").notNull(),
+    s3Url: text("s3_url").notNull(),
+    prompt: text("prompt").notNull(),
+    originalBrief: text("original_brief"),
+    aspectRatio: varchar("aspect_ratio", { length: 10 }).default("1:1"),
+    model: varchar("model", { length: 100 }).notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_generated_images_tenant").on(table.tenantId, table.createdAt),
+  ]
+);

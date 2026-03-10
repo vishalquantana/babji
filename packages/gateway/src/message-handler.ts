@@ -6,7 +6,8 @@ import type { LlmClient } from "@babji/agent";
 import { MemoryManager, SessionStore } from "@babji/memory";
 import { CreditLedger } from "@babji/credits";
 import { TokenVault } from "@babji/crypto";
-import { GmailHandler, GoogleCalendarHandler, GoogleAdsHandler, GoogleAnalyticsHandler, PeopleHandler, TodosHandler, GeneralResearchHandler } from "@babji/skills";
+import { GmailHandler, GoogleCalendarHandler, GoogleAdsHandler, GoogleAnalyticsHandler, PeopleHandler, TodosHandler, GeneralResearchHandler, ImageGenHandler, ImageStore } from "@babji/skills";
+import type { S3Config } from "@babji/skills";
 import type { SkillRequestManager } from "@babji/skills";
 import type { Database } from "@babji/db";
 import { schema } from "@babji/db";
@@ -110,6 +111,7 @@ export interface MessageHandlerDeps {
   googleApiKey: string;
   googleModel: string;
   usageTracker?: UsageTracker;
+  s3Config?: S3Config;
 }
 
 export class MessageHandler {
@@ -482,6 +484,25 @@ export class MessageHandler {
         ));
       }
 
+      // ── Register image generation handler (no OAuth needed, uses platform API key) ──
+      if (this.deps.googleApiKey) {
+        const imageStore = this.deps.s3Config
+          ? new ImageStore(this.deps.s3Config)
+          : null;
+
+        toolExecutor.registerSkill("image_gen", new ImageGenHandler(
+          this.deps.googleApiKey,
+          { name: tenant.name, memory: memoryContent },
+          imageStore,
+          {
+            tenantId,
+            insertGeneratedImage: async (row) => {
+              await this.deps.db.insert(schema.generatedImages).values(row);
+            },
+          },
+        ));
+      }
+
       // ── Build AI SDK tool definitions only for connected skills ──
       const connectedSkills = this.deps.availableSkills.filter(
         (s) => !s.requiresAuth || connectedProviders.includes(s.name)
@@ -635,11 +656,22 @@ export class MessageHandler {
         ].join("\n");
       }
 
+      // Check if the Brain produced any image media from tool results
+      const imageMedia = result.media?.[0];
+      const media = imageMedia
+        ? {
+            type: "image" as const,
+            url: imageMedia.url || `data:${imageMedia.mimeType};base64,${imageMedia.base64 || ""}`,
+            mimeType: imageMedia.mimeType,
+          }
+        : undefined;
+
       return {
         tenantId,
         channel,
         recipient: sender,
         text: responseText,
+        media,
       };
     } catch (err) {
       logger.error({ err, sender, channel }, "Error handling message");

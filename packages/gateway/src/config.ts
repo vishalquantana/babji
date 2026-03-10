@@ -33,6 +33,14 @@ export interface GatewayConfig {
     dataforseoLogin: string;
     dataforseoPassword: string;
   };
+  s3: {
+    enabled: boolean;
+    bucket: string;
+    region: string;
+    accessKeyId: string;
+    secretAccessKey: string;
+    endpoint?: string;
+  };
 }
 
 export function loadConfig(): GatewayConfig {
@@ -72,6 +80,14 @@ export function loadConfig(): GatewayConfig {
       scrapinApiKey: process.env.SCRAPIN_API_KEY || "",
       dataforseoLogin: process.env.DATAFORSEO_LOGIN || "",
       dataforseoPassword: process.env.DATAFORSEO_PASSWORD || "",
+    },
+    s3: {
+      enabled: !!process.env.S3_BUCKET && !!process.env.AWS_ACCESS_KEY_ID,
+      bucket: process.env.S3_BUCKET || "",
+      region: process.env.AWS_REGION || "us-east-1",
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
+      endpoint: process.env.AWS_S3_ENDPOINT || undefined,
     },
   };
 }

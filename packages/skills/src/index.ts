@@ -12,5 +12,7 @@ export { PeopleHandler } from "./people/index.js";
 export { TodosHandler } from "./todos/index.js";
 export { GeneralResearchHandler } from "./general-research/index.js";
 export type { DeepResearchDeps } from "./general-research/index.js";
+export { ImageGenHandler, ImageStore } from "./image-gen/index.js";
+export type { S3Config } from "./image-gen/index.js";
 export { SkillRequestManager } from "./skill-request-manager.js";
 export { loadSkillDefinitions } from "./registry.js";

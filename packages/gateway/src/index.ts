@@ -103,6 +103,13 @@ async function main() {
     googleApiKey: config.googleApiKey,
     googleModel: process.env.GOOGLE_MODEL || "gemini-3-flash-preview",
     usageTracker,
+    s3Config: config.s3.enabled ? {
+      bucket: config.s3.bucket,
+      region: config.s3.region,
+      accessKeyId: config.s3.accessKeyId,
+      secretAccessKey: config.s3.secretAccessKey,
+      endpoint: config.s3.endpoint,
+    } : undefined,
   });
 
   // Start channel adapters

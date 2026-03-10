@@ -75,6 +75,37 @@ export class TelegramAdapter implements ChannelAdapter {
   }
 
   async sendMessage(message: OutboundMessage): Promise<void> {
+    // Send image if media is attached
+    if (message.media?.type === "image" && message.media.url) {
+      try {
+        if (message.media.url.startsWith("data:")) {
+          // Base64 data URI — decode and send as buffer
+          const base64 = message.media.url.split(",")[1];
+          if (base64) {
+            const buffer = Buffer.from(base64, "base64");
+            const { InputFile } = await import("grammy");
+            await this.bot.api.sendPhoto(
+              message.recipient,
+              new InputFile(buffer, "image.png"),
+              { caption: message.text?.slice(0, 1024) || undefined },
+            );
+            return;
+          }
+        } else {
+          // URL — let Telegram fetch it
+          await this.bot.api.sendPhoto(
+            message.recipient,
+            message.media.url,
+            { caption: message.text?.slice(0, 1024) || undefined },
+          );
+          return;
+        }
+      } catch (err) {
+        logger.error({ err }, "Failed to send photo, falling back to text");
+        // Fall through to text message
+      }
+    }
+
     await this.bot.api.sendMessage(message.recipient, message.text);
   }
 }

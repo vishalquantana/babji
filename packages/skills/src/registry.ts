@@ -924,7 +924,48 @@ const generalResearchSkill: SkillDefinition = {
   creditsPerAction: 1,
 };
 
-const allSkills: SkillDefinition[] = [gmailSkill, calendarSkill, googleAdsSkill, googleAnalyticsSkill, checkWithTeacherSkill, peopleSkill, generalResearchSkill];
+const imageGenSkill: SkillDefinition = {
+  name: "image_gen",
+  displayName: "Image Generation",
+  description: "Generate professional images from text descriptions. First enhances the user's brief into a detailed prompt, then generates the image.",
+  actions: [
+    {
+      name: "enhance_prompt",
+      description: "Enhance a user's image brief into a detailed, professional prompt. Always call this FIRST before generate_image (unless the user's memory says they prefer direct generation). Show the enhanced prompt to the user and ask for approval or changes before generating.",
+      parameters: {
+        brief: {
+          type: "string",
+          required: true,
+          description: "The user's raw image request or brief",
+        },
+      },
+    },
+    {
+      name: "generate_image",
+      description: "Generate an image from an approved prompt. Call this AFTER the user approves the enhanced prompt from enhance_prompt, or directly if the user prefers skipping confirmation.",
+      parameters: {
+        prompt: {
+          type: "string",
+          required: true,
+          description: "The approved/final image generation prompt",
+        },
+        aspect_ratio: {
+          type: "string",
+          required: false,
+          description: "Aspect ratio: 1:1 (default), 3:2, 2:3, 3:4, 4:3, 9:16, 16:9",
+        },
+        quality: {
+          type: "string",
+          required: false,
+          description: "Image quality: 'standard' (default, fast) or 'pro' (highest quality, slower)",
+        },
+      },
+    },
+  ],
+  creditsPerAction: 1,
+};
+
+const allSkills: SkillDefinition[] = [gmailSkill, calendarSkill, googleAdsSkill, googleAnalyticsSkill, checkWithTeacherSkill, peopleSkill, generalResearchSkill, imageGenSkill];
 
 /**
  * Load all registered skill definitions.
