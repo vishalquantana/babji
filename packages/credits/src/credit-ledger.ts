@@ -26,6 +26,18 @@ export class CreditLedger {
     };
   }
 
+  /** Returns the daily free credit amount for a tenant, checking override then global config. */
+  async getDailyFreeAmount(tenantId: string): Promise<number> {
+    const row = await this.db.query.creditBalances.findFirst({
+      where: eq(schema.creditBalances.tenantId, tenantId),
+    });
+    if (row?.dailyFreeOverride != null) {
+      return row.dailyFreeOverride;
+    }
+    const config = await this.db.query.appConfig.findFirst();
+    return config?.defaultDailyFreeCredits ?? 100;
+  }
+
   async hasCredits(tenantId: string, needed: number): Promise<boolean> {
     const balance = await this.getBalance(tenantId);
     return balance.total >= needed;
@@ -62,9 +74,11 @@ export class CreditLedger {
   }
 
   async initializeForTenant(tenantId: string): Promise<void> {
+    const config = await this.db.query.appConfig.findFirst();
+    const dailyFree = config?.defaultDailyFreeCredits ?? 100;
     await this.db.insert(schema.creditBalances).values({
       tenantId,
-      dailyFree: 5,
+      dailyFree,
       prepaid: 0,
       proMonthly: 0,
     });
@@ -91,11 +105,12 @@ export class CreditLedger {
     const isSameDay = now.toDateString() === lastReset.toDateString();
 
     if (!isSameDay) {
+      const dailyFree = await this.getDailyFreeAmount(row.tenantId);
       await this.db
         .update(schema.creditBalances)
-        .set({ dailyFree: 5, lastDailyReset: now })
+        .set({ dailyFree, lastDailyReset: now })
         .where(eq(schema.creditBalances.tenantId, row.tenantId));
-      return { ...row, dailyFree: 5, lastDailyReset: now };
+      return { ...row, dailyFree, lastDailyReset: now };
     }
 
     return row;

@@ -44,14 +44,23 @@ export const tenants = pgTable(
   ]
 );
 
+export const appConfig = pgTable("app_config", {
+  id: integer("id").primaryKey().default(1),
+  defaultDailyFreeCredits: integer("default_daily_free_credits")
+    .notNull()
+    .default(100),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export const creditBalances = pgTable("credit_balances", {
   tenantId: uuid("tenant_id")
     .primaryKey()
     .references(() => tenants.id),
-  dailyFree: integer("daily_free").notNull().default(5),
+  dailyFree: integer("daily_free").notNull().default(100),
   prepaid: integer("prepaid").notNull().default(0),
   proMonthly: integer("pro_monthly").notNull().default(0),
   lastDailyReset: timestamp("last_daily_reset").notNull().defaultNow(),
+  dailyFreeOverride: integer("daily_free_override"),
 });
 
 export const creditTransactions = pgTable(

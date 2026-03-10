@@ -53,12 +53,27 @@ interface Profile {
   createdAt: string;
 }
 
+interface UsageRow {
+  tenant_name: string;
+  tenant_id: string;
+  messages: string;
+  total_tokens: string;
+  input_tokens: string;
+  output_tokens: string;
+  tool_calls: string;
+  external_api_calls: string;
+  bg_jobs: string;
+  total_credits: string;
+}
+
 interface DashboardData {
   tenants: Tenant[];
   connections: Connection[];
   skillRequests: SkillRequest[];
   recentAudit: AuditEntry[];
   profiles: Profile[];
+  usageSummary: UsageRow[];
+  defaultDailyFreeCredits: number;
 }
 
 const cardStyle: React.CSSProperties = {
@@ -100,6 +115,9 @@ export function DashboardClient() {
   const [editUrl, setEditUrl] = useState("");
   const [verifyingIds, setVerifyingIds] = useState<Set<string>>(new Set());
   const [rescrapingIds, setRescrapingIds] = useState<Set<string>>(new Set());
+  const [dailyFreeInput, setDailyFreeInput] = useState<string>("");
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsSaved, setSettingsSaved] = useState(false);
 
   useEffect(() => {
     fetch("/api/admin/data")
@@ -107,7 +125,10 @@ export function DashboardClient() {
         if (!r.ok) throw new Error("Unauthorized");
         return r.json();
       })
-      .then(setData)
+      .then((d) => {
+        setData(d);
+        setDailyFreeInput(String(d.defaultDailyFreeCredits ?? 100));
+      })
       .catch((e) => setError(e.message));
   }, []);
 
@@ -206,6 +227,31 @@ export function DashboardClient() {
     }
   }
 
+  async function handleSaveSettings() {
+    const value = Number(dailyFreeInput);
+    if (!Number.isInteger(value) || value < 0) {
+      alert("Please enter a non-negative integer");
+      return;
+    }
+    setSavingSettings(true);
+    setSettingsSaved(false);
+    try {
+      const res = await fetch("/api/admin/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ defaultDailyFreeCredits: value }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      setData((prev) => prev ? { ...prev, defaultDailyFreeCredits: value } : prev);
+      setSettingsSaved(true);
+      setTimeout(() => setSettingsSaved(false), 2000);
+    } catch {
+      alert("Failed to save settings");
+    } finally {
+      setSavingSettings(false);
+    }
+  }
+
   async function handleSaveAndRescrape(profileId: string) {
     // First update the URL
     try {
@@ -237,6 +283,52 @@ export function DashboardClient() {
         <span style={{ color: "#888", fontSize: 14 }}>
           {data.tenants.length} tenants &middot; {data.connections.length} connections
         </span>
+      </div>
+
+      {/* Settings */}
+      <div style={cardStyle}>
+        <h2 style={{ fontSize: 18, marginTop: 0, marginBottom: 16 }}>Settings</h2>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <label style={{ fontSize: 14, fontWeight: 500, color: "#374151" }}>
+            Default daily free credits:
+          </label>
+          <input
+            type="number"
+            min={0}
+            value={dailyFreeInput}
+            onChange={(e) => setDailyFreeInput(e.target.value)}
+            style={{
+              width: 100,
+              padding: "6px 10px",
+              borderRadius: 6,
+              border: "1px solid #d1d5db",
+              fontSize: 14,
+              outline: "none",
+            }}
+          />
+          <button
+            onClick={handleSaveSettings}
+            disabled={savingSettings}
+            style={{
+              padding: "6px 16px",
+              borderRadius: 6,
+              border: "none",
+              backgroundColor: savingSettings ? "#9ca3af" : "#2563eb",
+              color: "white",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: savingSettings ? "default" : "pointer",
+            }}
+          >
+            {savingSettings ? "Saving..." : "Save"}
+          </button>
+          {settingsSaved && (
+            <span style={{ fontSize: 13, color: "#10b981", fontWeight: 500 }}>Saved</span>
+          )}
+        </div>
+        <p style={{ fontSize: 12, color: "#888", marginTop: 8, marginBottom: 0 }}>
+          This value is used when resetting daily free credits for all tenants (unless a per-tenant override is set).
+        </p>
       </div>
 
       {/* Tenants */}
@@ -276,6 +368,81 @@ export function DashboardClient() {
             </tbody>
           </table>
         )}
+      </div>
+
+      {/* Usage Summary (last 7 days) */}
+      <div style={cardStyle}>
+        <h2 style={{ fontSize: 18, marginTop: 0, marginBottom: 16 }}>Usage Summary (last 7 days)</h2>
+        {(() => {
+          const usage = data.usageSummary || [];
+          // Calculate totals
+          let totalMessages = 0, totalTokens = 0, totalToolCalls = 0, totalExternalApis = 0;
+          for (const r of usage) {
+            totalMessages += Number(r.messages);
+            totalTokens += Number(r.total_tokens);
+            totalToolCalls += Number(r.tool_calls);
+            totalExternalApis += Number(r.external_api_calls);
+          }
+
+          const statBoxStyle: React.CSSProperties = {
+            flex: 1, padding: 16, borderRadius: 8, backgroundColor: "#f9fafb",
+            textAlign: "center", minWidth: 100,
+          };
+
+          return (
+            <>
+              {/* Stat boxes */}
+              <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+                <div style={statBoxStyle}>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: "#2563eb" }}>{totalMessages.toLocaleString()}</div>
+                  <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>Messages</div>
+                </div>
+                <div style={statBoxStyle}>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: "#8b5cf6" }}>{totalTokens.toLocaleString()}</div>
+                  <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>Tokens</div>
+                </div>
+                <div style={statBoxStyle}>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: "#f59e0b" }}>{totalToolCalls.toLocaleString()}</div>
+                  <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>Tool Calls</div>
+                </div>
+                <div style={statBoxStyle}>
+                  <div style={{ fontSize: 24, fontWeight: 700, color: "#10b981" }}>{totalExternalApis.toLocaleString()}</div>
+                  <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>External APIs</div>
+                </div>
+              </div>
+
+              {/* Per-tenant breakdown */}
+              {usage.length === 0 ? (
+                <p style={{ color: "#888" }}>No usage data yet</p>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+                  <thead>
+                    <tr style={{ textAlign: "left", borderBottom: "1px solid #eee" }}>
+                      <th style={{ padding: "8px 0" }}>Tenant</th>
+                      <th style={{ textAlign: "right" }}>Messages</th>
+                      <th style={{ textAlign: "right" }}>Tokens</th>
+                      <th style={{ textAlign: "right" }}>Tool Calls</th>
+                      <th style={{ textAlign: "right" }}>Ext. APIs</th>
+                      <th style={{ textAlign: "right" }}>Credits</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usage.map((r) => (
+                      <tr key={r.tenant_id} style={{ borderBottom: "1px solid #f5f5f5" }}>
+                        <td style={{ padding: "8px 0", fontWeight: 500 }}>{r.tenant_name}</td>
+                        <td style={{ textAlign: "right" }}>{Number(r.messages).toLocaleString()}</td>
+                        <td style={{ textAlign: "right" }}>{Number(r.total_tokens).toLocaleString()}</td>
+                        <td style={{ textAlign: "right" }}>{Number(r.tool_calls).toLocaleString()}</td>
+                        <td style={{ textAlign: "right" }}>{Number(r.external_api_calls).toLocaleString()}</td>
+                        <td style={{ textAlign: "right" }}>{Number(r.total_credits).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       {/* Service Connections */}

@@ -81,6 +81,7 @@ interface CreditBalance {
   prepaid: number;
   proMonthly: number;
   lastDailyReset: string;
+  dailyFreeOverride: number | null;
 }
 
 interface CreditTransaction {
@@ -115,6 +116,7 @@ interface TenantDetailData {
   creditBalance: CreditBalance | null;
   creditTransactions: CreditTransaction[];
   sessions: Session[];
+  defaultDailyFreeCredits: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -267,6 +269,10 @@ export function TenantDetailClient({ tenantId }: { tenantId: string }) {
   const [completingIds, setCompletingIds] = useState<Set<string>>(new Set());
   const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
   const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set());
+  const [overrideEnabled, setOverrideEnabled] = useState(false);
+  const [overrideInput, setOverrideInput] = useState("");
+  const [savingOverride, setSavingOverride] = useState(false);
+  const [overrideSaved, setOverrideSaved] = useState(false);
 
   useEffect(() => {
     fetch(`/api/admin/tenant/${tenantId}`)
@@ -274,7 +280,17 @@ export function TenantDetailClient({ tenantId }: { tenantId: string }) {
         if (!r.ok) throw new Error(r.status === 404 ? "Tenant not found" : "Unauthorized");
         return r.json();
       })
-      .then(setData)
+      .then((d) => {
+        setData(d);
+        const cb = d.creditBalance;
+        if (cb?.dailyFreeOverride != null) {
+          setOverrideEnabled(true);
+          setOverrideInput(String(cb.dailyFreeOverride));
+        } else {
+          setOverrideEnabled(false);
+          setOverrideInput(String(d.defaultDailyFreeCredits ?? 100));
+        }
+      })
       .catch((e) => setError(e.message));
   }, [tenantId]);
 
@@ -331,6 +347,35 @@ export function TenantDetailClient({ tenantId }: { tenantId: string }) {
     }
   }
 
+  async function handleSaveOverride() {
+    const value = overrideEnabled ? Number(overrideInput) : null;
+    if (value !== null && (!Number.isInteger(value) || value < 0)) {
+      alert("Please enter a non-negative integer");
+      return;
+    }
+    setSavingOverride(true);
+    setOverrideSaved(false);
+    try {
+      const res = await fetch(`/api/admin/tenant/${tenantId}/daily-free`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dailyFreeOverride: value }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      setData((prev) =>
+        prev && prev.creditBalance
+          ? { ...prev, creditBalance: { ...prev.creditBalance, dailyFreeOverride: value } }
+          : prev,
+      );
+      setOverrideSaved(true);
+      setTimeout(() => setOverrideSaved(false), 2000);
+    } catch {
+      alert("Failed to save override");
+    } finally {
+      setSavingOverride(false);
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
@@ -379,6 +424,66 @@ export function TenantDetailClient({ tenantId }: { tenantId: string }) {
           <StatItem label="Connected services" value={String(connections.length)} />
           <StatItem label="Phone" value={tenant.phone || "\u2014"} />
           <StatItem label="Telegram ID" value={tenant.telegramUserId || "\u2014"} />
+        </div>
+
+        {/* Daily free override */}
+        <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid #eee" }}>
+          <div style={{ fontSize: 14, fontWeight: 500, color: "#374151", marginBottom: 8 }}>
+            Daily Free Credits
+            <span style={{ fontSize: 12, fontWeight: 400, color: "#888", marginLeft: 8 }}>
+              (global default: {data.defaultDailyFreeCredits})
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={overrideEnabled}
+                onChange={(e) => {
+                  setOverrideEnabled(e.target.checked);
+                  if (!e.target.checked) {
+                    setOverrideInput(String(data.defaultDailyFreeCredits));
+                  }
+                }}
+              />
+              Override for this tenant
+            </label>
+            {overrideEnabled && (
+              <input
+                type="number"
+                min={0}
+                value={overrideInput}
+                onChange={(e) => setOverrideInput(e.target.value)}
+                style={{
+                  width: 80,
+                  padding: "4px 8px",
+                  borderRadius: 6,
+                  border: "1px solid #d1d5db",
+                  fontSize: 13,
+                  outline: "none",
+                }}
+              />
+            )}
+            <button
+              onClick={handleSaveOverride}
+              disabled={savingOverride}
+              style={{
+                padding: "4px 14px",
+                borderRadius: 6,
+                border: "none",
+                backgroundColor: savingOverride ? "#9ca3af" : "#2563eb",
+                color: "white",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: savingOverride ? "default" : "pointer",
+              }}
+            >
+              {savingOverride ? "Saving..." : "Save"}
+            </button>
+            {overrideSaved && (
+              <span style={{ fontSize: 12, color: "#10b981", fontWeight: 500 }}>Saved</span>
+            )}
+          </div>
         </div>
       </div>
 

@@ -34,6 +34,7 @@ export async function GET(
       todos,
       creditBalance,
       creditTransactions,
+      appConfig,
     ] = await Promise.all([
       db
         .select()
@@ -70,6 +71,7 @@ export async function GET(
         .where(eq(schema.creditTransactions.tenantId, tenantId))
         .orderBy(desc(schema.creditTransactions.createdAt))
         .limit(50),
+      db.query.appConfig.findFirst(),
     ]);
 
     // Fetch conversation sessions from gateway
@@ -99,6 +101,7 @@ export async function GET(
       creditBalance: creditBalance || null,
       creditTransactions,
       sessions,
+      defaultDailyFreeCredits: appConfig?.defaultDailyFreeCredits ?? 100,
     });
   } finally {
     await close();
