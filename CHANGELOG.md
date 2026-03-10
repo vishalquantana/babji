@@ -6,6 +6,12 @@ All notable changes to Babji are documented here. Each entry notes whether the c
 
 ## 2026-03-10
 
+### Image generation skill with Gemini API (BAB-12) [DEPLOYED]
+- **What:** New `image_gen` skill lets users generate images via conversational brief. Two-step flow: (1) `enhance_prompt` — metaprompts the user's brief with their context/memory using lite LLM, shows enhanced prompt for approval, (2) `generate_image` — calls Gemini image API (flash or pro model), uploads PNG to S3, saves metadata to DB. Supports "don't ask me again" preference stored in MEMORY.md. Telegram adapter updated to send photos via `sendPhoto` API (URL or base64 buffer). Images stored on Vultr Object Storage (S3-compatible) for future gallery feature.
+- **Files:** `packages/skills/src/image-gen/` (new: handler.ts, s3.ts, index.ts), `packages/skills/src/registry.ts`, `packages/skills/src/index.ts`, `packages/agent/src/brain.ts` (MediaResult type, base64 stripping), `packages/agent/src/index.ts`, `packages/gateway/src/message-handler.ts`, `packages/gateway/src/config.ts` (S3 config), `packages/gateway/src/index.ts`, `packages/gateway/src/adapters/telegram.ts` (sendPhoto), `packages/db/src/schema.ts` (generated_images table)
+- **DB migration:** `CREATE TABLE generated_images (...)` with tenant index
+- **Dependencies:** `@aws-sdk/client-s3` added to skills package
+
 ### Fix: Gmail 502 + deep research delivery + PM2 management (BAB-11) [DEPLOYED]
 - **What:** Gmail OAuth connect links returned 502 because the OAuth portal process had died and wasn't auto-managed. Deep research jobs timed out after 60 minutes but Google's API can take hours — one completed research report was never delivered. Fixed by: (1) Adding OAuth portal to PM2 for auto-restart (`babji-oauth`, ID 2), (2) Increasing deep research timeout from 60 min to 6 hours, (3) Manually recovered and delivered the completed research to the user, (4) Updated CLAUDE.md deploy instructions to use PM2 instead of manual nohup (which caused duplicate processes). Both gateway and OAuth portal now managed by PM2 with auto-restart and startup persistence.
 - **Files:** `packages/gateway/src/job-runner.ts` (timeout change), `CLAUDE.md` (PM2 deploy instructions)
