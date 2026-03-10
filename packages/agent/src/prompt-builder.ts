@@ -8,6 +8,7 @@ interface PromptContext {
   userName?: string;
   timezone?: string;
   completedSkillRequests?: Array<{ skillName: string; context: string }>;
+  dailyFreeCredits?: number;
 }
 
 export class PromptBuilder {
@@ -115,7 +116,8 @@ export class PromptBuilder {
 
     parts.push("");
     parts.push("## Credits");
-    parts.push("Each action (research, email, calendar, etc.) costs 1 credit. The client gets 5 free daily credits.");
+    const dailyFree = ctx.dailyFreeCredits ?? 100;
+    parts.push(`Each action (research, email, calendar, etc.) costs 1 credit. The client gets ${dailyFree} free daily credits.`);
     parts.push("Do NOT mention credits proactively. Only mention credits when:");
     parts.push("- The client's balance drops to 2 or fewer -- then say 'Heads up, you have [X] uses left today. They reset tomorrow.'");
     parts.push("- The client asks about credits, pricing, or how many uses they have");

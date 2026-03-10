@@ -31,6 +31,7 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     credits: {
       hasCredits: vi.fn().mockResolvedValue(true),
       deduct: vi.fn().mockResolvedValue(undefined),
+      getDailyFreeAmount: vi.fn().mockResolvedValue(100),
     },
     llm: {
       chat: vi.fn().mockResolvedValue({
@@ -183,6 +184,7 @@ describe("E2E message pipeline", () => {
         credits: {
           hasCredits: vi.fn().mockResolvedValue(false),
           deduct: vi.fn(),
+          getDailyFreeAmount: vi.fn().mockResolvedValue(100),
         },
         llm: {
           chat: vi

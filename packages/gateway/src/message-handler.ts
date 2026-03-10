@@ -526,6 +526,7 @@ export class MessageHandler {
       }));
 
       // Build system prompt from soul + memory + skills
+      const dailyFreeCredits = await this.deps.credits.getDailyFreeAmount(tenantId);
       const systemPrompt = PromptBuilder.build({
         soul,
         memory: memoryContent,
@@ -534,6 +535,7 @@ export class MessageHandler {
         userName: tenant.name,
         timezone: tenant.timezone ?? "UTC",
         completedSkillRequests,
+        dailyFreeCredits,
       });
 
       // Create per-request Brain with the tenant's ToolExecutor
