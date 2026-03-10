@@ -1,4 +1,4 @@
-import { eq, and, lte } from "drizzle-orm";
+import { eq, and, lte, gte, sql } from "drizzle-orm";
 import type { Database } from "@babji/db";
 import { schema } from "@babji/db";
 import { TokenVault } from "@babji/crypto";
@@ -12,6 +12,7 @@ import { ensureValidToken } from "./token-refresh.js";
 import { logger } from "./logger.js";
 import { AdminNotifier } from "./admin-notifier.js";
 import { MeetingBriefingService } from "./meeting-briefing.js";
+import type { UsageTracker } from "./usage-tracker.js";
 
 /** Converts a local time string like "07:30" + IANA timezone to the next UTC timestamp for that local time */
 function nextUtcForLocalTime(localTime: string, timezone: string): Date {
@@ -110,6 +111,7 @@ export interface JobRunnerDeps {
     dataforseoPassword: string;
   };
   adminNotifier?: AdminNotifier;
+  usageTracker?: UsageTracker;
 }
 
 export class JobRunner {
@@ -183,6 +185,9 @@ export class JobRunner {
         break;
       case "profile_scan":
         await this.runProfileScan(job);
+        break;
+      case "daily_usage_report":
+        await this.runDailyUsageReport(job);
         break;
       default:
         logger.warn({ jobType: job.jobType }, "Unknown job type, skipping");
@@ -278,6 +283,11 @@ export class JobRunner {
       });
 
       logger.info({ tenantId, events: result.count }, "Sent daily calendar summary");
+
+      // Log background job usage
+      if (this.deps.usageTracker) {
+        this.deps.usageTracker.logBackgroundJob({ tenantId, jobType: "daily_calendar_summary" }).catch(() => {});
+      }
 
       // ── Meeting briefing integration ──
       if (this.deps.peopleConfig) {
@@ -517,11 +527,12 @@ export class JobRunner {
       return;
     }
 
-    // Check timeout: if started more than 60 minutes ago, fail
+    // Check timeout: if started more than 6 hours ago, fail
     const startedAt = payload.startedAt ? new Date(payload.startedAt) : job.createdAt;
     const elapsedMs = Date.now() - startedAt.getTime();
-    if (elapsedMs > 60 * 60 * 1000) {
-      logger.warn({ jobId: job.id, elapsedMs }, "deep_research timed out after 60 minutes");
+    const DEEP_RESEARCH_TIMEOUT_MS = 6 * 60 * 60 * 1000; // 6 hours
+    if (elapsedMs > DEEP_RESEARCH_TIMEOUT_MS) {
+      logger.warn({ jobId: job.id, elapsedMs }, "deep_research timed out after 6 hours");
       await this.sendDeepResearchError(payload.tenantId, payload.channel, payload.query || "your topic");
       await this.deps.db.update(schema.scheduledJobs)
         .set({ status: "failed", lastRunAt: new Date() })
@@ -699,6 +710,11 @@ export class JobRunner {
         text: briefing,
       });
       logger.info({ tenantId, meeting: meeting.summary, attendees: meeting.attendees.length }, "Sent pre-meeting briefing");
+
+      // Log background job usage
+      if (this.deps.usageTracker) {
+        this.deps.usageTracker.logBackgroundJob({ tenantId, jobType: "meeting_briefing" }).catch(() => {});
+      }
     } catch (err) {
       logger.error({ err, tenantId }, "Failed to generate/send pre-meeting briefing");
       await this.deps.db.update(schema.scheduledJobs)
@@ -796,6 +812,12 @@ export class JobRunner {
           );
           researchCount++;
 
+          // Log external API calls for profile research
+          if (this.deps.usageTracker) {
+            this.deps.usageTracker.logExternalApi({ tenantId, apiName: "scrapin", action: "profile_scan", success: true }).catch(() => {});
+            this.deps.usageTracker.logExternalApi({ tenantId, apiName: "dataforseo", action: "profile_scan", success: true }).catch(() => {});
+          }
+
           newProfiles.push({
             email: attendee.email,
             displayName: attendee.displayName,
@@ -811,6 +833,11 @@ export class JobRunner {
         await this.deps.adminNotifier.notifyNewProfiles(newProfiles, tomorrowStr);
       }
 
+      // Log background job usage
+      if (this.deps.usageTracker) {
+        this.deps.usageTracker.logBackgroundJob({ tenantId, jobType: "profile_scan" }).catch(() => {});
+      }
+
       logger.info({ tenantId, newProfiles: newProfiles.length }, "Profile scan completed");
     } catch (err) {
       logger.error({ err, tenantId }, "Profile scan failed");
@@ -819,6 +846,95 @@ export class JobRunner {
     await this.deps.db.update(schema.scheduledJobs)
       .set({ status: "completed", lastRunAt: new Date() })
       .where(eq(schema.scheduledJobs.id, job.id));
+  }
+
+  private async runDailyUsageReport(job: typeof schema.scheduledJobs.$inferSelect): Promise<void> {
+    if (!this.deps.adminNotifier) {
+      logger.warn("No adminNotifier for daily usage report");
+      await this.rescheduleDaily(job, "UTC");
+      return;
+    }
+
+    try {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+      // Aggregate usage from audit_log in the last 24h
+      const rows = await this.deps.db.execute(sql`
+        SELECT
+          t.name AS tenant_name,
+          t.id AS tenant_id,
+          COUNT(*) FILTER (WHERE a.action = 'message_processed') AS messages,
+          COALESCE(SUM((a.metadata->>'totalTokens')::int) FILTER (WHERE a.action = 'message_processed'), 0) AS message_tokens,
+          COALESCE(SUM((a.metadata->>'totalTokens')::int) FILTER (WHERE a.action = 'background_job'), 0) AS bg_tokens,
+          COUNT(*) FILTER (WHERE a.action = 'external_api_call') AS external_api_calls,
+          COUNT(*) FILTER (WHERE a.action = 'background_job') AS bg_jobs,
+          COALESCE(SUM(a.credit_cost), 0) AS total_credits
+        FROM audit_log a
+        JOIN tenants t ON t.id = a.tenant_id
+        WHERE a.created_at >= ${since}
+        GROUP BY t.id, t.name
+        ORDER BY message_tokens DESC
+      `);
+
+      const tenantRows = rows as unknown as Array<{
+        tenant_name: string;
+        tenant_id: string;
+        messages: string;
+        message_tokens: string;
+        bg_tokens: string;
+        external_api_calls: string;
+        bg_jobs: string;
+        total_credits: string;
+      }>;
+
+      // Calculate totals
+      let totalMessages = 0;
+      let totalTokens = 0;
+      let totalExternalApis = 0;
+      let totalBgJobs = 0;
+      let totalCredits = 0;
+
+      for (const row of tenantRows) {
+        totalMessages += Number(row.messages);
+        totalTokens += Number(row.message_tokens) + Number(row.bg_tokens);
+        totalExternalApis += Number(row.external_api_calls);
+        totalBgJobs += Number(row.bg_jobs);
+        totalCredits += Number(row.total_credits);
+      }
+
+      // Build report
+      const lines: string[] = [
+        `Daily Usage Report (last 24h)`,
+        ``,
+        `Total Messages: ${totalMessages}`,
+        `Total Tokens: ${totalTokens.toLocaleString()}`,
+        `External API Calls: ${totalExternalApis}`,
+        `Background Jobs: ${totalBgJobs}`,
+        `Credits Used: ${totalCredits}`,
+      ];
+
+      if (tenantRows.length > 0) {
+        lines.push(``);
+        lines.push(`Top users by tokens:`);
+        const top10 = tenantRows.slice(0, 10);
+        for (let i = 0; i < top10.length; i++) {
+          const r = top10[i];
+          const tokens = Number(r.message_tokens) + Number(r.bg_tokens);
+          lines.push(`${i + 1}. ${r.tenant_name}: ${tokens.toLocaleString()} tokens, ${r.messages} msgs`);
+        }
+      } else {
+        lines.push(``);
+        lines.push(`No usage recorded in the last 24 hours.`);
+      }
+
+      await this.deps.adminNotifier.notify(lines.join("\n"));
+      logger.info({ tenants: tenantRows.length, totalTokens }, "Sent daily usage report");
+    } catch (err) {
+      logger.error({ err }, "Failed to generate daily usage report");
+    }
+
+    // Reschedule for tomorrow at 08:00 UTC
+    await this.rescheduleDaily(job, "UTC");
   }
 
   private async deliverDeepResearchReport(
@@ -886,6 +1002,11 @@ export class JobRunner {
       recipient,
       text: result.content,
     });
+
+    // Log background job usage with token counts from Brain summarization
+    if (this.deps.usageTracker) {
+      this.deps.usageTracker.logBackgroundJob({ tenantId, jobType: "deep_research", usage: result.usage }).catch(() => {});
+    }
 
     // Store the report path in tenant's memory for follow-up email requests
     await this.deps.memory.appendMemory(tenantId, `Deep research report on "${query}" saved at ${reportPath}`);

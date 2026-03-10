@@ -1,19 +1,34 @@
 import { google } from "googleapis";
 import type { SkillHandler } from "@babji/agent";
 
-const ADS_API_BASE = "https://googleads.googleapis.com/v17";
+const ADS_API_BASE = "https://googleads.googleapis.com/v20";
+
+export type IssueCallback = (issue: string, context: string) => void;
 
 export class GoogleAdsHandler implements SkillHandler {
   private accessToken: string;
   private developerToken?: string;
+  private onIssue?: IssueCallback;
+  private reportedIssues = new Set<string>();
 
-  constructor(accessToken: string, developerToken?: string) {
+  constructor(accessToken: string, developerToken?: string, onIssue?: IssueCallback) {
     this.accessToken = accessToken;
     this.developerToken = developerToken;
+    this.onIssue = onIssue;
+  }
+
+  /** Report an issue once per handler instance (avoids duplicate reports per conversation) */
+  private reportIssue(key: string, context: string): void {
+    if (this.onIssue && !this.reportedIssues.has(key)) {
+      this.reportedIssues.add(key);
+      this.onIssue(key, context);
+    }
   }
 
   async execute(actionName: string, params: Record<string, unknown>): Promise<unknown> {
     switch (actionName) {
+      case "list_accounts":
+        return this.listAccounts();
       case "list_campaigns":
         this.requireParam(params, "customer_id", actionName);
         return this.listCampaigns(params);
@@ -116,14 +131,79 @@ export class GoogleAdsHandler implements SkillHandler {
       let errorMsg: string;
       try {
         const parsed = JSON.parse(errorBody);
-        errorMsg = parsed.error?.message || parsed.error_description || `HTTP ${res.status}`;
+        // Google Ads API nests the real error in details[0].errors[0] (or array wrapper [0].error)
+        const err = parsed.error || parsed[0]?.error;
+        const detail = err?.details?.[0]?.errors?.[0];
+        errorMsg = detail?.message || err?.message || parsed.error_description || `HTTP ${res.status}`;
       } catch {
         errorMsg = `HTTP ${res.status}`;
+      }
+      // Report specific API-level issues to teacher/Jira
+      if (errorMsg.includes("test accounts") || errorMsg.includes("NOT_APPROVED")) {
+        this.reportIssue("google_ads_test_token", `Google Ads API rejected request: ${errorMsg}`);
+      } else if (res.status === 403) {
+        this.reportIssue("google_ads_permission_" + res.status, `Google Ads API permission error: ${errorMsg}`);
       }
       throw new Error(errorMsg);
     }
 
     return res.json();
+  }
+
+  private async listAccounts() {
+    try {
+      // This endpoint doesn't require a customer_id — uses the OAuth token
+      const data = (await this.apiRequest(
+        "GET",
+        `${ADS_API_BASE}/customers:listAccessibleCustomers`,
+      )) as { resourceNames?: string[] };
+
+      const resourceNames = data.resourceNames || [];
+      // Resource names are like "customers/1234567890"
+      const customerIds = resourceNames.map((rn: string) => rn.replace("customers/", ""));
+
+      // Fetch descriptive name for each account
+      let testTokenLimited = false;
+      const accounts = await Promise.all(
+        customerIds.map(async (id: string) => {
+          try {
+            const info = (await this.apiRequest(
+              "POST",
+              `${ADS_API_BASE}/customers/${id}/googleAds:searchStream`,
+              { query: "SELECT customer.id, customer.descriptive_name, customer.currency_code, customer.manager FROM customer LIMIT 1" },
+            )) as any;
+            const row = info[0]?.results?.[0] || info.results?.[0];
+            return {
+              customerId: id,
+              name: row?.customer?.descriptiveName || `Account ${id}`,
+              currencyCode: row?.customer?.currencyCode,
+              isManager: row?.customer?.manager ?? false,
+            };
+          } catch (err) {
+            const msg = (err as Error).message || "";
+            if (msg.includes("test accounts") || msg.includes("NOT_APPROVED")) {
+              testTokenLimited = true;
+              this.reportIssue("google_ads_test_token", `Google Ads developer token only has Test access. Cannot retrieve account names or campaign data for production accounts. Error: ${msg}`);
+            }
+            return { customerId: id, name: null, currencyCode: null, isManager: false };
+          }
+        }),
+      );
+
+      const result: Record<string, unknown> = {
+        accounts,
+        count: accounts.length,
+        hint: "Present these as a numbered list. Ask the user which account to work with.",
+      };
+
+      if (testTokenLimited) {
+        result.warning = "The developer token only has Test access, so account names and campaign data for production accounts cannot be retrieved. Tell the user their accounts were found but detailed analysis requires the developer token to be upgraded to Basic access. Use babji.check_with_teacher to report this limitation.";
+      }
+
+      return result;
+    } catch (err) {
+      this.wrapApiError("list_accounts", err);
+    }
   }
 
   private async listCampaigns(params: Record<string, unknown>) {

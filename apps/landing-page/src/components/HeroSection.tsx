@@ -95,7 +95,7 @@ export default function HeroSection() {
                 {/* Center: Hero Copy */}
                 <div className="text-center flex flex-col items-center justify-center space-y-6">
                     <h1 className="text-5xl md:text-7xl font-display font-bold tracking-tight text-[#2B211E] drop-shadow-sm leading-[1.2]">
-                        <span className="juice-text">Babji</span> is the secret to <br />
+                        <span className="juice-text">Babji</span> is the secret to <br className="hidden md:inline" />
                         your business success.
                     </h1>
                     <p className="text-lg md:text-xl text-[#2B211E]/70 max-w-lg font-mono tracking-wide leading-relaxed">

@@ -30,6 +30,27 @@ export const providers: Record<string, ProviderConfig> = {
     authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
     tokenUrl: "https://oauth2.googleapis.com/token",
   },
+  google_ads: {
+    displayName: "Google Ads",
+    description: "Manage campaigns, view reports, and control budgets",
+    clientIdEnv: "GOOGLE_CLIENT_ID",
+    clientSecretEnv: "GOOGLE_CLIENT_SECRET",
+    scopes: ["https://www.googleapis.com/auth/adwords"],
+    authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+    tokenUrl: "https://oauth2.googleapis.com/token",
+  },
+  google_analytics: {
+    displayName: "Google Analytics",
+    description: "View website traffic, audience, and conversion data",
+    clientIdEnv: "GOOGLE_CLIENT_ID",
+    clientSecretEnv: "GOOGLE_CLIENT_SECRET",
+    scopes: [
+      "https://www.googleapis.com/auth/analytics.readonly",
+      "https://www.googleapis.com/auth/analytics.manage.users.readonly",
+    ],
+    authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+    tokenUrl: "https://oauth2.googleapis.com/token",
+  },
   meta: {
     displayName: "Meta (Facebook & Instagram)",
     description: "Manage your Facebook Pages and Instagram",

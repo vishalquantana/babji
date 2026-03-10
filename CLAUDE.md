@@ -40,29 +40,34 @@ User (Telegram/WhatsApp)
 - **PostgreSQL**: Docker container on port 5432 (user: `babji`, pass: `babji_prod_2026`, db: `babji`)
 - **Redis**: Docker container on port 6379
 - **Tenant data**: `/opt/babji/data/tenants/<tenant-id>/` (SOUL.md, MEMORY.md, etc.)
-- **Gateway log**: `/var/log/babji-gateway.log`
+- **Gateway log**: `/root/.pm2/logs/babji-gateway-out.log` (PM2 managed)
 - **Node/pnpm available at**: `/usr/bin/node`, `/usr/bin/pnpm`
+- **PM2 path**: `/root/.nvm/versions/node/v22.15.0/bin/pm2`
 
 ### OAuth Portal (runs on same server as Gateway)
 - **Same server**: `65.20.76.199`
 - **Domain**: `babji.quantana.top` (nginx reverse proxy with Let's Encrypt SSL)
 - **Next.js port**: 3100 (nginx proxies from 443)
 - **Start script**: `/opt/babji/start-oauth-portal.sh` (sources .env, then runs Next.js)
-- **Log**: `/var/log/babji-oauth.log`
+- **Log**: `/root/.pm2/logs/babji-oauth-out.log` (PM2 managed)
 - **Handles**: OAuth callbacks, admin dashboard (`/admin`), short links (`/link/<id>`)
-- **IMPORTANT**: Always use `start-oauth-portal.sh` to start — it sources `.env` for DATABASE_URL, ENCRYPTION_KEY, etc.
+
+### Process Management (PM2)
+Both the gateway and OAuth portal are managed by PM2 for auto-restart on crash/reboot.
+- **IMPORTANT**: NEVER use `nohup`/manual `node` to start services — always use `pm2 restart`.
+- PM2 process names: `babji-gateway` (ID 1), `babji-oauth` (ID 2)
+- PM2 binary: `export PATH="/root/.nvm/versions/node/v22.15.0/bin:$PATH"` then `pm2 ...`
+- View logs: `pm2 logs babji-gateway --lines 50 --nostream`
+- View status: `pm2 list`
 
 ## How to Run
 
-### Start Gateway (Production)
+### Start/Restart Gateway (Production)
 ```bash
 ssh root@65.20.76.199
-# Kill existing:
-kill $(pgrep -f "packages/gateway") 2>/dev/null
-# Start:
-nohup /opt/babji/start-gateway.sh > /var/log/babji-gateway.log 2>&1 &
-# Or manually:
-cd /opt/babji && set -a && source .env && set +a && node packages/gateway/dist/index.js
+export PATH="/root/.nvm/versions/node/v22.15.0/bin:$PATH"
+pm2 restart babji-gateway
+pm2 logs babji-gateway --lines 10 --nostream  # verify
 ```
 
 ### Deploy Changes
@@ -72,7 +77,7 @@ pnpm --filter @babji/agent build    # if agent package changed
 pnpm --filter @babji/gateway build  # gateway always
 
 # 2. Run tests
-pnpm --filter @babji/gateway test   # should pass 29/29
+pnpm --filter @babji/gateway test   # should pass 34/34
 
 # 3. Sync to server (preserves .env and data)
 rsync -az --delete \
@@ -80,13 +85,13 @@ rsync -az --delete \
   /Users/vishalkumar/Downloads/babji/ root@65.20.76.199:/opt/babji/
 
 # 4. Install deps on server
-ssh root@65.20.76.199 'cd /opt/babji && pnpm install --frozen-lockfile'
+ssh root@65.20.76.199 'cd /opt/babji && pnpm install --no-frozen-lockfile'
 
-# 5. Restart gateway
-ssh root@65.20.76.199 'kill $(pgrep -f "packages/gateway"); nohup /opt/babji/start-gateway.sh > /var/log/babji-gateway.log 2>&1 &'
+# 5. Restart gateway via PM2
+ssh root@65.20.76.199 'export PATH="/root/.nvm/versions/node/v22.15.0/bin:$PATH" && pm2 restart babji-gateway'
 
 # 6. Verify
-ssh root@65.20.76.199 'sleep 2 && tail -10 /var/log/babji-gateway.log'
+ssh root@65.20.76.199 'sleep 2 && curl -s http://localhost:3000/health'
 ```
 
 ### Deploy OAuth Portal
@@ -97,11 +102,11 @@ The OAuth portal runs on the **same server as the gateway** (65.20.76.199), on p
 # 1. Build on server
 ssh root@65.20.76.199 'cd /opt/babji && pnpm --filter oauth-portal build'
 
-# 2. Restart OAuth portal (MUST use start script to source .env)
-ssh root@65.20.76.199 'kill $(pgrep -f "next-server") 2>/dev/null; sleep 1; nohup /opt/babji/start-oauth-portal.sh > /var/log/babji-oauth.log 2>&1 &'
+# 2. Restart OAuth portal via PM2
+ssh root@65.20.76.199 'export PATH="/root/.nvm/versions/node/v22.15.0/bin:$PATH" && pm2 restart babji-oauth'
 
 # 3. Verify
-ssh root@65.20.76.199 'sleep 3 && tail -5 /var/log/babji-oauth.log'
+ssh root@65.20.76.199 'sleep 3 && curl -s -o /dev/null -w "%{http_code}" https://babji.quantana.top/'
 ```
 
 ### Local Development
@@ -190,6 +195,26 @@ Tests cover: message normalizer, rate limiter, tenant resolver, onboarding, e2e 
 ## Changelog
 
 All technical changes MUST be logged in `CHANGELOG.md` in the project root. After every commit or deploy, append an entry with the date, what changed, which files were touched, and whether it's been deployed. This avoids re-deploying or losing track of what's live vs pending.
+
+## API Reference for New Skills (context-hub)
+
+When building new skill handlers that integrate external APIs, use `chub` (context-hub CLI) for curated, accurate API documentation instead of relying on LLM memory which may hallucinate APIs.
+
+```bash
+# Search for an API
+chub search hubspot
+
+# Get JS/Node.js docs for a specific API
+chub get hubspot/crm --lang js
+chub get jira/issues --lang js
+chub get stripe/payments
+chub get slack/workspace --lang js
+chub get sendgrid/email-api --lang js
+```
+
+**Available APIs relevant to Babji:** hubspot/crm, jira/issues, google/bigquery, gemini/genai, slack/workspace, stripe/payments, sendgrid/email-api, notion/workspace-api, salesforce/crm, discord/bot, twilio/messaging, redis/key-value
+
+**MANDATORY:** Before writing any new `SkillHandler` that calls an external API, ALWAYS run `chub search <api-name>` first to check if curated docs exist. If they do, fetch them with `chub get <id> --lang js` and use them as the reference for SDK choice, auth patterns, and code structure. Do not rely on LLM memory alone for API integration code.
 
 ## Common Issues
 - **Gateway not loading .env**: Must source `.env` before starting. Use `start-gateway.sh` or `set -a && source .env && set +a`

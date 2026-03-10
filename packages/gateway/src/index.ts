@@ -1,7 +1,7 @@
 import { loadConfig, validateConfig } from "./config.js";
 import { createServer } from "./server.js";
 import { createDb, schema } from "@babji/db";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { MemoryManager, SessionStore } from "@babji/memory";
 import { CreditLedger } from "@babji/credits";
 import { TokenVault } from "@babji/crypto";
@@ -15,6 +15,7 @@ import { WhatsAppAdapter } from "./adapters/whatsapp.js";
 import type { ChannelAdapter } from "./adapters/types.js";
 import { JobRunner } from "./job-runner.js";
 import { AdminNotifier } from "./admin-notifier.js";
+import { UsageTracker } from "./usage-tracker.js";
 import { logger } from "./logger.js";
 
 async function main() {
@@ -75,6 +76,9 @@ async function main() {
     logger.info("Admin bot notifications enabled");
   }
 
+  // Usage tracking (writes to audit_log table)
+  const usageTracker = new UsageTracker(db);
+
   // Load skill definitions
   const availableSkills = loadSkillDefinitions();
   logger.info({ skills: availableSkills.map((s) => s.name) }, "Loaded skill definitions");
@@ -98,6 +102,7 @@ async function main() {
     peopleConfig: config.people,
     googleApiKey: config.googleApiKey,
     googleModel: process.env.GOOGLE_MODEL || "gemini-3-flash-preview",
+    usageTracker,
   });
 
   // Start channel adapters
@@ -142,8 +147,39 @@ async function main() {
       dataforseoPassword: config.people.dataforseoPassword,
     } : undefined,
     adminNotifier,
+    usageTracker,
   });
   jobRunner.start();
+
+  // Seed daily_usage_report job if not already present
+  if (config.adminBot.enabled) {
+    const existingReport = await db.query.scheduledJobs.findFirst({
+      where: and(
+        eq(schema.scheduledJobs.jobType, "daily_usage_report"),
+        eq(schema.scheduledJobs.status, "active"),
+      ),
+    });
+    if (!existingReport) {
+      // Need at least one tenant for the FK. Use the first tenant.
+      const firstTenant = await db.query.tenants.findFirst();
+      if (firstTenant) {
+        const tomorrow8am = new Date();
+        tomorrow8am.setUTCHours(8, 0, 0, 0);
+        if (tomorrow8am <= new Date()) {
+          tomorrow8am.setUTCDate(tomorrow8am.getUTCDate() + 1);
+        }
+        await db.insert(schema.scheduledJobs).values({
+          tenantId: firstTenant.id,
+          jobType: "daily_usage_report",
+          scheduleType: "daily",
+          scheduledAt: tomorrow8am,
+          recurrenceRule: "08:00",
+          payload: {},
+        });
+        logger.info({ nextRun: tomorrow8am.toISOString() }, "Seeded daily_usage_report job");
+      }
+    }
+  }
 
   // Create and start HTTP server
   const server = createServer({ config, db, handler, adapters });

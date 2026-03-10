@@ -4,6 +4,20 @@ All notable changes to Babji are documented here. Each entry notes whether the c
 
 ---
 
+## 2026-03-10
+
+### Fix: Gmail 502 + deep research delivery + PM2 management (BAB-11) [DEPLOYED]
+- **What:** Gmail OAuth connect links returned 502 because the OAuth portal process had died and wasn't auto-managed. Deep research jobs timed out after 60 minutes but Google's API can take hours — one completed research report was never delivered. Fixed by: (1) Adding OAuth portal to PM2 for auto-restart (`babji-oauth`, ID 2), (2) Increasing deep research timeout from 60 min to 6 hours, (3) Manually recovered and delivered the completed research to the user, (4) Updated CLAUDE.md deploy instructions to use PM2 instead of manual nohup (which caused duplicate processes). Both gateway and OAuth portal now managed by PM2 with auto-restart and startup persistence.
+- **Files:** `packages/gateway/src/job-runner.ts` (timeout change), `CLAUDE.md` (PM2 deploy instructions)
+- **Root cause:** OAuth portal process crashed with no supervisor. `start-gateway.sh` was being called via both PM2 and manual nohup, causing duplicate processes and log confusion.
+
+### Usage tracking: LLM tokens, external APIs, daily reports [DEPLOYED]
+- **What:** Comprehensive usage tracking across the entire system. LLM token counts (input/output/total) captured from Vercel AI SDK and accumulated across Brain ReAct loop turns. External API calls (DataForSEO, Scrapin.io) logged per action. Background jobs (calendar summary, meeting briefing, profile scan, deep research) log usage. All events written to the existing `audit_log` table via a new `UsageTracker` utility (fire-and-forget pattern). Admin dashboard has a new "Usage Summary (last 7 days)" section with stat boxes (Messages, Tokens, Tool Calls, External APIs) and a per-tenant breakdown table sorted by token usage. Daily usage report sent to admin via Telegram at 08:00 UTC showing total usage + top 10 users by tokens.
+- **Files:** `packages/agent/src/llm-client.ts`, `packages/agent/src/brain.ts`, `packages/gateway/src/usage-tracker.ts` (new), `packages/gateway/src/message-handler.ts`, `packages/gateway/src/job-runner.ts`, `packages/gateway/src/index.ts`, `packages/db/src/schema.ts`, `apps/oauth-portal/src/app/api/admin/data/route.ts`, `apps/oauth-portal/src/app/admin/dashboard/client.tsx`
+- **DB migration:** `CREATE INDEX idx_audit_action_created ON audit_log(action, created_at)` (already run on production)
+
+---
+
 ## 2026-03-09
 
 ### Profile verification & correction workflow [DEPLOYED]

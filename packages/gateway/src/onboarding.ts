@@ -122,6 +122,8 @@ export class OnboardingHandler {
     return [
       "Hey there! I'm Babji -- think of me as your business helper who lives right here in this chat.",
       "",
+      "Babji is currently in free beta testing mode, so chats may be used to improve Babji's features. A future subscription tier will include the option to opt out of training.",
+      "",
       "What should I call you?",
     ].join("\n");
   }

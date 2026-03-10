@@ -17,6 +17,7 @@ import { logger } from "./logger.js";
 import { timezoneFromText } from "./city-timezone.js";
 import { timezoneFromPhone } from "./phone-timezone.js";
 import { ensureValidToken } from "./token-refresh.js";
+import type { UsageTracker } from "./usage-tracker.js";
 
 /** Pattern to detect "connect <something>" commands */
 const CONNECT_PREFIX_RE = /^connect\s+(?:my\s+|to\s+(?:my\s+)?)?(.+?)\s*$/i;
@@ -108,6 +109,7 @@ export interface MessageHandlerDeps {
   };
   googleApiKey: string;
   googleModel: string;
+  usageTracker?: UsageTracker;
 }
 
 export class MessageHandler {
@@ -433,10 +435,30 @@ export class MessageHandler {
 
       // ── Register people research handler (server-side keys, always available) ──
       if (this.deps.peopleConfig?.enabled) {
-        toolExecutor.registerSkill("people", new PeopleHandler(
+        const peopleHandler = new PeopleHandler(
           { login: this.deps.peopleConfig.dataforseoLogin, password: this.deps.peopleConfig.dataforseoPassword },
           { apiKey: this.deps.peopleConfig.scrapinApiKey },
-        ));
+        );
+
+        if (this.deps.usageTracker) {
+          const tracker = this.deps.usageTracker;
+          toolExecutor.registerSkill("people", {
+            execute: async (actionName: string, params: Record<string, unknown>) => {
+              const result = await peopleHandler.execute(actionName, params);
+              const success = !(result as Record<string, unknown>).error;
+              // research_person uses both DataForSEO + Scrapin; lookup_profile uses Scrapin only
+              if (actionName === "research_person") {
+                tracker.logExternalApi({ tenantId, apiName: "dataforseo", action: actionName, success }).catch(() => {});
+                tracker.logExternalApi({ tenantId, apiName: "scrapin", action: actionName, success }).catch(() => {});
+              } else if (actionName === "lookup_profile") {
+                tracker.logExternalApi({ tenantId, apiName: "scrapin", action: actionName, success }).catch(() => {});
+              }
+              return result;
+            },
+          });
+        } else {
+          toolExecutor.registerSkill("people", peopleHandler);
+        }
       }
 
       // ── Register general research handler (server-side keys, always available) ──
@@ -510,6 +532,7 @@ export class MessageHandler {
       });
 
       // Deduct credits when the brain invoked tool actions
+      let creditCost = 0;
       if (result.toolCallsMade.length > 0) {
         const hasCredits = await this.deps.credits.hasCredits(tenantId, 1);
         if (hasCredits) {
@@ -518,9 +541,24 @@ export class MessageHandler {
             1,
             `Action: ${result.toolCallsMade.map((t) => t.actionName).join(", ")}`,
           );
+          creditCost = 1;
         } else {
           logger.warn({ tenantId }, "Insufficient credits for tool call deduction");
         }
+      }
+
+      // Log usage (fire-and-forget)
+      if (this.deps.usageTracker) {
+        this.deps.usageTracker.logMessageProcessed({
+          tenantId,
+          channel,
+          toolCallsMade: result.toolCallsMade.map(t => ({
+            skillName: t.skillName,
+            actionName: t.actionName,
+          })),
+          usage: result.usage,
+          creditCost,
+        }).catch(() => {});
       }
 
       // Store outbound response in session history

@@ -17,7 +17,7 @@ export default function SkillsLearningSection() {
                     </div>
 
                     <h2 className="text-4xl md:text-5xl font-serif text-[#2B211E] tracking-tight leading-tight">
-                        The first AI assistant that <br />
+                        The first AI assistant that <br className="hidden md:inline" />
                         <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#D8232A] to-[#F1B434]">learns new skills.</span>
                     </h2>
 

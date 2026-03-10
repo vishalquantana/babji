@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Babji - Google Ads API Design Documentation</title>
+<style>
+  body { font-family: Arial, sans-serif; max-width: 750px; margin: 40px auto; padding: 0 30px; color: #333; line-height: 1.7; font-size: 14px; }
+  .note { color: #d93025; margin-bottom: 25px; font-size: 13px; }
+  strong { font-weight: 700; }
+  ul { padding-left: 25px; margin: 8px 0 15px; }
+  li { margin-bottom: 4px; }
+  a { color: #1a73e8; }
+
+  /* Telegram mockup styles */
+  .mockup-label { font-weight: 700; margin-top: 25px; margin-bottom: 10px; }
+  .telegram-mock { background: #0e1621; border-radius: 12px; padding: 20px 16px; max-width: 500px; margin: 15px 0 25px; font-family: -apple-system, 'Segoe UI', sans-serif; font-size: 13px; }
+  .telegram-mock .header { color: #fff; font-weight: 600; font-size: 15px; text-align: center; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #1e2c3a; }
+  .msg { max-width: 85%; padding: 8px 12px; border-radius: 12px; margin-bottom: 8px; word-wrap: break-word; }
+  .msg-user { background: #2b5278; color: #fff; margin-left: auto; border-bottom-right-radius: 4px; }
+  .msg-bot { background: #182533; color: #e0e0e0; margin-right: auto; border-bottom-left-radius: 4px; }
+  .msg-time { font-size: 10px; color: #6b8a9e; text-align: right; margin-top: 3px; }
+  .msg-container { display: flex; margin-bottom: 6px; }
+  .msg-container.user { justify-content: flex-end; }
+  .msg-container.bot { justify-content: flex-start; }
+
+  /* Report mockup */
+  .report-mock { background: #182533; border-radius: 8px; padding: 12px 14px; margin: 6px 0; color: #e0e0e0; font-family: monospace; font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+
+<p class="note">Note: this tool is externally accessible, so screenshots/mockups of the tool are included below.</p>
+
+<p><strong>Company Name:</strong> Quantana Pty Ltd</p>
+
+<p><strong>Business Model:</strong> Quantana is a technology and AI consulting company (quantana.com.au). We work with a range of small and medium business clients across Australia and internationally. We run Google Ads campaigns for our own AI services as well as manage campaigns on behalf of our consulting clients. Our tool "Babji" is an AI business assistant that our clients use via Telegram and WhatsApp to manage their day-to-day business operations, including monitoring and managing their Google Ads campaigns through natural language conversation.</p>
+
+<p><strong>Tool Access/Use:</strong> Babji is used by both internal employees and external clients. Our consulting clients connect their own Google Ads accounts to Babji via OAuth, and then interact with it through Telegram or WhatsApp chat. They can ask questions like "how are my ads doing this month?" and Babji will pull the relevant data from the Google Ads API and summarize it conversationally. Internal staff at Quantana also use Babji to monitor client campaigns and spot issues. Each user's Google Ads data is completely isolated — one client cannot see another client's data. OAuth tokens are encrypted at rest using AES-256-GCM.</p>
+
+<p><strong>Tool Design:</strong> Babji uses a conversational AI (ReAct loop) that interprets user messages and decides which Google Ads API calls to make. For reporting, it queries the Google Ads API in real-time using the <code>searchStream</code> endpoint with GAQL queries, then the AI summarizes the metrics into plain language for the user. We do not store Google Ads data in our own database — it is fetched on-demand, summarized, and presented in chat. For campaign management, users can update budgets and pause/enable campaigns through conversation, with confirmation required before any changes are applied.</p>
+
+<p><strong>API Services Called:</strong></p>
+<ul>
+  <li>Pull campaign, ad group, and keyword performance reports using the <a href="https://developers.google.com/google-ads/api/fields/v17/campaign">Campaign</a>, <a href="https://developers.google.com/google-ads/api/fields/v17/ad_group">AdGroup</a>, and <a href="https://developers.google.com/google-ads/api/fields/v17/keyword_view">KeywordView</a> resources via <code>GoogleAds.SearchStream</code></li>
+  <li>Pull audience demographic data using the <a href="https://developers.google.com/google-ads/api/fields/v17/gender_view">GenderView</a>, <a href="https://developers.google.com/google-ads/api/fields/v17/age_range_view">AgeRangeView</a>, and device segments</li>
+  <li>Update campaign budgets via the <a href="https://developers.google.com/google-ads/api/reference/rpc/v17/CampaignBudgetService">CampaignBudgetService</a> mutate endpoint</li>
+  <li>Pause and enable campaigns via the <a href="https://developers.google.com/google-ads/api/reference/rpc/v17/CampaignService">CampaignService</a> mutate endpoint</li>
+</ul>
+
+<p class="mockup-label">Tool Mockups:</p>
+<p>Since Babji is a chat-based tool (Telegram/WhatsApp), below are mockups of typical user interactions with the Google Ads integration:</p>
+
+<p style="margin-top:20px; margin-bottom:5px;"><strong>Mockup 1: Campaign Performance Report</strong></p>
+<div class="telegram-mock">
+  <div class="header">Babji</div>
+
+  <div class="msg-container user">
+    <div class="msg msg-user">
+      How are my Google Ads doing this month?
+      <div class="msg-time">10:32 AM</div>
+    </div>
+  </div>
+
+  <div class="msg-container bot">
+    <div class="msg msg-bot">
+      Here's your Google Ads performance for March 2026:
+      <div class="report-mock">Search Campaign - "AI Services AU"
+  Status: Active
+  Impressions: 12,450
+  Clicks: 834
+  CTR: 6.7%
+  Cost: $412.30
+  Conversions: 23
+  Cost per conversion: $17.93
+
+Performance Max - "Lead Gen APAC"
+  Status: Active
+  Impressions: 45,200
+  Clicks: 1,205
+  CTR: 2.7%
+  Cost: $890.50
+  Conversions: 41
+  Cost per conversion: $21.72</div>
+      Your Search campaign is performing well with a 6.7% CTR and $17.93 per conversion. The Performance Max campaign has a lower CTR but is driving more total conversions.
+
+      Want me to dig deeper into keyword performance or audience breakdown?
+      <div class="msg-time">10:33 AM</div>
+    </div>
+  </div>
+
+  <div class="msg-container user">
+    <div class="msg msg-user">
+      Yes, show me keywords for the Search campaign
+      <div class="msg-time">10:33 AM</div>
+    </div>
+  </div>
+
+  <div class="msg-container bot">
+    <div class="msg msg-bot">
+      Top keywords for "AI Services AU" this month:
+      <div class="report-mock">1. "ai consulting australia" (Broad)
+   Clicks: 245 | CTR: 8.2% | Conv: 12 | Cost: $98
+
+2. "business ai assistant" (Phrase)
+   Clicks: 189 | CTR: 7.1% | Conv: 8 | Cost: $76
+
+3. "ai automation services" (Broad)
+   Clicks: 156 | CTR: 5.9% | Conv: 3 | Cost: $89
+
+4. "chatbot for business" (Broad)
+   Clicks: 102 | CTR: 3.1% | Conv: 0 | Cost: $67</div>
+      Keyword #4 "chatbot for business" has spent $67 with zero conversions and a low 3.1% CTR. You might want to pause it or add it as a negative keyword.
+
+      Want me to pause that keyword, or adjust anything else?
+      <div class="msg-time">10:34 AM</div>
+    </div>
+  </div>
+</div>
+
+<p style="margin-top:20px; margin-bottom:5px;"><strong>Mockup 2: Budget Management</strong></p>
+<div class="telegram-mock">
+  <div class="header">Babji</div>
+
+  <div class="msg-container user">
+    <div class="msg msg-user">
+      Increase my Search campaign budget to $30 per day
+      <div class="msg-time">2:15 PM</div>
+    </div>
+  </div>
+
+  <div class="msg-container bot">
+    <div class="msg msg-bot">
+      I'll update the daily budget for "AI Services AU" from $20.00 to $30.00 per day.
+
+      Just to confirm -- go ahead with this change?
+      <div class="msg-time">2:15 PM</div>
+    </div>
+  </div>
+
+  <div class="msg-container user">
+    <div class="msg msg-user">
+      Yes
+      <div class="msg-time">2:15 PM</div>
+    </div>
+  </div>
+
+  <div class="msg-container bot">
+    <div class="msg msg-bot">
+      Done. The daily budget for "AI Services AU" has been updated to $30.00/day. The change is effective immediately.
+      <div class="msg-time">2:16 PM</div>
+    </div>
+  </div>
+</div>
+
+<p style="margin-top:20px; margin-bottom:5px;"><strong>Mockup 3: Campaign Pause</strong></p>
+<div class="telegram-mock">
+  <div class="header">Babji</div>
+
+  <div class="msg-container user">
+    <div class="msg msg-user">
+      Pause the Performance Max campaign
+      <div class="msg-time">5:40 PM</div>
+    </div>
+  </div>
+
+  <div class="msg-container bot">
+    <div class="msg msg-bot">
+      I'll pause the "Lead Gen APAC" Performance Max campaign. It's currently spending about $30/day.
+
+      Confirm pause?
+      <div class="msg-time">5:40 PM</div>
+    </div>
+  </div>
+
+  <div class="msg-container user">
+    <div class="msg msg-user">
+      Yes, pause it
+      <div class="msg-time">5:41 PM</div>
+    </div>
+  </div>
+
+  <div class="msg-container bot">
+    <div class="msg msg-bot">
+      "Lead Gen APAC" is now paused. Just say "enable Lead Gen campaign" when you want to turn it back on.
+      <div class="msg-time">5:41 PM</div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
