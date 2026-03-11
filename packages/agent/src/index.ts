@@ -5,3 +5,4 @@ export type { SkillHandler } from "./tool-executor.js";
 export { MultiModelLlmClient, skillsToAiTools } from "./llm-client.js";
 export { PromptBuilder } from "./prompt-builder.js";
 export { MemoryExtractor } from "./memory-extractor.js";
+export type { PeopleExtractionInput, PeopleExtractionResult, PersonFact } from "./memory-extractor.js";
