@@ -6,6 +6,10 @@ All notable changes to Babji are documented here. Each entry notes whether the c
 
 ## 2026-03-11
 
+### Daily Jira Report (BAB-38) [DEPLOYED]
+- **What:** Any user who connects their Jira account automatically receives a daily report at 09:00 (configurable) covering their assigned open issues grouped by status and recent activity in their projects (last 24h, by others). Uses `DailyJiraReportService` with LLM composition via `gemini-3.1-flash-lite-preview`. Auto-seeded on Jira OAuth connect. Configurable via `babji.configure_jira_report` (on/off + custom time). New `jiraReportPref` column on tenants table. Also fixed `ensureValidToken` to return `cloudId` for Jira.
+- **Files:** `packages/gateway/src/daily-jira-report.ts` (new), `packages/gateway/src/job-runner.ts`, `packages/gateway/src/server.ts`, `packages/gateway/src/message-handler.ts`, `packages/gateway/src/token-refresh.ts`, `packages/agent/src/prompt-builder.ts`, `packages/skills/src/registry.ts`, `packages/db/src/schema.ts`
+
 ### Proactive email digest [DEPLOYED]
 - **What:** Babji now proactively triages unread Gmail 2x daily (morning + evening), drafts replies for actionable emails, and sends a numbered digest via Telegram/WhatsApp. Users can respond with "send 1", "edit 2 to say ...", or "skip all". Digest frequency is configurable via `babji.configure_email_digest` (morning_only, morning_evening, three_times, off, or custom times). Uses `gemini-3.1-flash-lite-preview` for LLM triage. Pending drafts stored as tenant JSON file with 12h expiry. Job auto-seeded on Gmail OAuth connect.
 - **Files:** `packages/gateway/src/email-digest.ts` (new), `packages/gateway/src/job-runner.ts`, `packages/gateway/src/server.ts`, `packages/gateway/src/message-handler.ts`, `packages/agent/src/prompt-builder.ts`, `packages/skills/src/registry.ts`
