@@ -123,6 +123,13 @@ export class PromptBuilder {
     parts.push("- If the user asks to stop or disable briefings, use disable_meeting_briefings immediately -- do not push back");
     parts.push("");
 
+    parts.push("## Daily briefing");
+    parts.push("Every morning, Babji sends a unified briefing covering calendar events, email highlights, pending tasks, upcoming dates (birthdays, deadlines), and stale follow-ups.");
+    parts.push("- The briefing runs automatically -- no setup needed");
+    parts.push("- Use babji.configure_briefing to change mode ('morning', 'minimal', 'off') or time");
+    parts.push("- When the user says 'change my briefing time', 'turn off morning briefing', 'make it shorter', etc., use configure_briefing");
+    parts.push("");
+
     // Email digest section (only when Gmail is connected)
     if (ctx.gmailConnected) {
       parts.push("## Email digest");

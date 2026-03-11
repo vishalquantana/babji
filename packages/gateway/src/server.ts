@@ -86,11 +86,11 @@ export function createServer({ config, db, handler, adapters }: ServerDeps) {
     // Auto-seed scheduled jobs for newly connected services
     if (provider === "google_calendar" && db) {
       try {
-        // Check if a daily_calendar_summary job already exists for this tenant
+        // Check if a daily_briefing job already exists for this tenant
         const existing = await db.query.scheduledJobs.findFirst({
           where: and(
             eq(schema.scheduledJobs.tenantId, tenantId),
-            eq(schema.scheduledJobs.jobType, "daily_calendar_summary"),
+            eq(schema.scheduledJobs.jobType, "daily_briefing"),
           ),
         });
 
@@ -104,7 +104,7 @@ export function createServer({ config, db, handler, adapters }: ServerDeps) {
 
           await db.insert(schema.scheduledJobs).values({
             tenantId,
-            jobType: "daily_calendar_summary",
+            jobType: "daily_briefing",
             scheduleType: "daily",
             scheduledAt,
             recurrenceRule: "07:30",
@@ -112,10 +112,10 @@ export function createServer({ config, db, handler, adapters }: ServerDeps) {
             status: "active",
           });
 
-          logger.info({ tenantId, scheduledAt: scheduledAt.toISOString() }, "Seeded daily calendar summary job");
+          logger.info({ tenantId, scheduledAt: scheduledAt.toISOString() }, "Seeded daily briefing job");
         }
       } catch (err) {
-        logger.error({ err, tenantId }, "Failed to seed calendar summary job");
+        logger.error({ err, tenantId }, "Failed to seed daily briefing job");
       }
 
       // Infer email domain from calendar events (fire-and-forget)
@@ -157,17 +157,18 @@ export function createServer({ config, db, handler, adapters }: ServerDeps) {
     }
 
 
-    // Auto-seed email_digest job when Gmail is connected
+    // Auto-seed daily_briefing + email_digest when Gmail is connected
     if (provider === "gmail" && db) {
       try {
-        const existing = await db.query.scheduledJobs.findFirst({
+        // Seed daily_briefing if not already present (e.g. tenant connected Gmail before Calendar)
+        const existingBriefing = await db.query.scheduledJobs.findFirst({
           where: and(
             eq(schema.scheduledJobs.tenantId, tenantId),
-            eq(schema.scheduledJobs.jobType, "email_digest"),
+            eq(schema.scheduledJobs.jobType, "daily_briefing"),
           ),
         });
 
-        if (!existing) {
+        if (!existingBriefing) {
           const tenant = await db.query.tenants.findFirst({
             where: eq(schema.tenants.id, tenantId),
           });
@@ -176,18 +177,46 @@ export function createServer({ config, db, handler, adapters }: ServerDeps) {
 
           await db.insert(schema.scheduledJobs).values({
             tenantId,
+            jobType: "daily_briefing",
+            scheduleType: "daily",
+            scheduledAt,
+            recurrenceRule: "08:00",
+            payload: {},
+            status: "active",
+          });
+
+          logger.info({ tenantId, scheduledAt: scheduledAt.toISOString() }, "Seeded daily briefing job on Gmail connect");
+        }
+
+        // Also seed standalone email_digest for afternoon slot
+        const existingDigest = await db.query.scheduledJobs.findFirst({
+          where: and(
+            eq(schema.scheduledJobs.tenantId, tenantId),
+            eq(schema.scheduledJobs.jobType, "email_digest"),
+          ),
+        });
+
+        if (!existingDigest) {
+          const tenant = await db.query.tenants.findFirst({
+            where: eq(schema.tenants.id, tenantId),
+          });
+          const timezone = tenant?.timezone || "UTC";
+          const scheduledAt = nextUtcForLocalTime("17:00", timezone);
+
+          await db.insert(schema.scheduledJobs).values({
+            tenantId,
             jobType: "email_digest",
             scheduleType: "daily",
             scheduledAt,
-            recurrenceRule: "08:00,17:00",
+            recurrenceRule: "17:00",
             payload: { lastCheckedAt: null },
             status: "active",
           });
 
-          logger.info({ tenantId, scheduledAt: scheduledAt.toISOString() }, "Seeded email digest job on Gmail connect");
+          logger.info({ tenantId, scheduledAt: scheduledAt.toISOString() }, "Seeded afternoon email digest job on Gmail connect");
         }
       } catch (err) {
-        logger.error({ err, tenantId }, "Failed to seed email digest job");
+        logger.error({ err, tenantId }, "Failed to seed email/briefing jobs on Gmail connect");
       }
     }
     // Fire and forget — don't block the OAuth callback

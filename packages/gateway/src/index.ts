@@ -13,7 +13,7 @@ import { MessageHandler } from "./message-handler.js";
 import { TelegramAdapter } from "./adapters/telegram.js";
 import { WhatsAppAdapter } from "./adapters/whatsapp.js";
 import type { ChannelAdapter } from "./adapters/types.js";
-import { JobRunner } from "./job-runner.js";
+import { JobRunner, nextUtcForLocalTime } from "./job-runner.js";
 import { AdminNotifier } from "./admin-notifier.js";
 import { UsageTracker } from "./usage-tracker.js";
 import { logger } from "./logger.js";
@@ -87,7 +87,6 @@ async function main() {
   const handler = new MessageHandler({
     memory,
     sessions,
-    credits,
     llm,
     llmLite,
     availableSkills,
@@ -157,6 +156,78 @@ async function main() {
     usageTracker,
   });
   jobRunner.start();
+
+  // ── Startup migration: daily_calendar_summary → daily_briefing ──
+  try {
+    const migrated = await db.update(schema.scheduledJobs)
+      .set({ jobType: "daily_briefing" })
+      .where(and(
+        eq(schema.scheduledJobs.jobType, "daily_calendar_summary"),
+        eq(schema.scheduledJobs.status, "active"),
+      ));
+    logger.info("Migrated daily_calendar_summary jobs to daily_briefing");
+  } catch (err) {
+    logger.error({ err }, "Failed to migrate daily_calendar_summary jobs");
+  }
+
+  // ── Seed daily_briefing for all onboarded tenants that don't have one ──
+  try {
+    const allTenants = await db.query.tenants.findMany({
+      where: eq(schema.tenants.onboardingPhase, "done"),
+    });
+    for (const tenant of allTenants) {
+      const existing = await db.query.scheduledJobs.findFirst({
+        where: and(
+          eq(schema.scheduledJobs.tenantId, tenant.id),
+          eq(schema.scheduledJobs.jobType, "daily_briefing"),
+        ),
+      });
+      if (!existing) {
+        const tz = tenant.timezone || "UTC";
+        await db.insert(schema.scheduledJobs).values({
+          tenantId: tenant.id,
+          jobType: "daily_briefing",
+          scheduleType: "daily",
+          scheduledAt: nextUtcForLocalTime("08:00", tz),
+          recurrenceRule: "08:00",
+          payload: {},
+          status: "active",
+        });
+        logger.info({ tenantId: tenant.id }, "Seeded daily_briefing job for existing tenant");
+      }
+
+      // Seed weekly memory_scan
+      const existingScan = await db.query.scheduledJobs.findFirst({
+        where: and(
+          eq(schema.scheduledJobs.tenantId, tenant.id),
+          eq(schema.scheduledJobs.jobType, "memory_scan"),
+        ),
+      });
+      if (!existingScan) {
+        const tz = tenant.timezone || "UTC";
+        // Wednesday 10:00 AM local time
+        const nextWed = nextUtcForLocalTime("10:00", tz);
+        // Advance to next Wednesday
+        const dayOfWeek = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" }).format(nextWed);
+        const daysMap: Record<string, number> = { Sun: 3, Mon: 2, Tue: 1, Wed: 0, Thu: 6, Fri: 5, Sat: 4 };
+        const daysToAdd = daysMap[dayOfWeek] || 0;
+        const scheduledAt = new Date(nextWed.getTime() + daysToAdd * 86_400_000);
+
+        await db.insert(schema.scheduledJobs).values({
+          tenantId: tenant.id,
+          jobType: "memory_scan",
+          scheduleType: "daily",
+          scheduledAt,
+          recurrenceRule: "10:00",
+          payload: {},
+          status: "active",
+        });
+        logger.info({ tenantId: tenant.id }, "Seeded weekly memory_scan job for existing tenant");
+      }
+    }
+  } catch (err) {
+    logger.error({ err }, "Failed to seed daily_briefing/memory_scan for existing tenants");
+  }
 
   // Seed daily_usage_report job if not already present
   if (config.adminBot.enabled) {

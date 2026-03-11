@@ -14,6 +14,8 @@ import { logger } from "./logger.js";
 import { AdminNotifier } from "./admin-notifier.js";
 import { MeetingBriefingService } from "./meeting-briefing.js";
 import { EmailDigestRunner } from "./email-digest.js";
+import { DailyBriefingService } from "./daily-briefing.js";
+import { MemoryScannerService } from "./memory-scanner.js";
 import type { UsageTracker } from "./usage-tracker.js";
 
 /** Converts a local time string like "07:30" + IANA timezone to the next UTC timestamp for that local time */
@@ -193,6 +195,12 @@ export class JobRunner {
         break;
       case "email_digest":
         await this.runEmailDigest(job);
+        break;
+      case "daily_briefing":
+        await this.runDailyBriefing(job);
+        break;
+      case "memory_scan":
+        await this.runMemoryScan(job);
         break;
       default:
         logger.warn({ jobType: job.jobType }, "Unknown job type, skipping");
@@ -1148,6 +1156,247 @@ export class JobRunner {
     }
 
     await this.rescheduleEmailDigest(job, timezone);
+  }
+
+  private async runDailyBriefing(job: typeof schema.scheduledJobs.$inferSelect): Promise<void> {
+    const tenantId = job.tenantId;
+
+    const tenant = await this.deps.db.query.tenants.findFirst({
+      where: eq(schema.tenants.id, tenantId),
+    });
+    if (!tenant) {
+      logger.warn({ tenantId }, "Tenant not found for daily briefing job");
+      return;
+    }
+
+    // Check if briefing is disabled
+    const briefingPref = (tenant as Record<string, unknown>).briefingPref as string | null;
+    if (briefingPref === "off") {
+      logger.info({ tenantId }, "Daily briefing disabled for tenant, skipping");
+      const timezone = tenant.timezone || "UTC";
+      await this.rescheduleDaily(job, timezone);
+      return;
+    }
+
+    const timezone = tenant.timezone || "UTC";
+
+    const recipient = tenant.telegramUserId || tenant.phone;
+    const channel = tenant.telegramUserId ? "telegram" : "whatsapp";
+    if (!recipient) {
+      logger.warn({ tenantId }, "No recipient channel for daily briefing");
+      await this.rescheduleDaily(job, timezone);
+      return;
+    }
+
+    const adapter = this.deps.adapters.find((a) => a.name === channel);
+    if (!adapter) {
+      logger.warn({ tenantId, channel }, "No adapter found for daily briefing");
+      await this.rescheduleDaily(job, timezone);
+      return;
+    }
+
+    try {
+      const briefingService = new DailyBriefingService({
+        db: this.deps.db,
+        vault: this.deps.vault,
+        memory: this.deps.memory,
+        googleApiKey: this.deps.googleApiKey,
+      });
+
+      const message = await briefingService.generateBriefing(tenant, timezone);
+
+      if (message) {
+        await adapter.sendMessage({
+          tenantId,
+          channel: channel as "telegram" | "whatsapp" | "app",
+          recipient,
+          text: message,
+        });
+        logger.info({ tenantId }, "Sent daily briefing");
+      } else {
+        logger.info({ tenantId }, "Daily briefing: nothing to report, silent skip");
+      }
+
+      // Log background job usage
+      if (this.deps.usageTracker) {
+        this.deps.usageTracker.logBackgroundJob({ tenantId, jobType: "daily_briefing" }).catch(() => {});
+      }
+
+      // ── Meeting briefing integration (same as runCalendarSummary) ──
+      if (this.deps.peopleConfig) {
+        const tokenResult = await ensureValidToken(tenantId, "google_calendar", this.deps.vault, this.deps.db);
+        if (tokenResult && tokenResult.status !== "expired") {
+          const briefingServiceMtg = new MeetingBriefingService({
+            db: this.deps.db,
+            vault: this.deps.vault,
+            llm: this.deps.llm,
+            memory: this.deps.memory,
+            availableSkills: this.deps.availableSkills,
+            peopleConfig: this.deps.peopleConfig,
+          });
+
+          let tenantDomain = tenant.emailDomain as string | null;
+          if (!tenantDomain) {
+            const calHandler = new GoogleCalendarHandler(tokenResult.accessToken);
+            const formatter = new Intl.DateTimeFormat("en-CA", {
+              timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit",
+            });
+            const dateStr = formatter.format(new Date());
+            const timeMinISO = new Date(`${dateStr}T00:00:00+00:00`).toISOString();
+            const timeMaxISO = new Date(`${dateStr}T23:59:59+00:00`).toISOString();
+            const result = await calHandler.execute("list_events", {
+              time_min: timeMinISO, time_max: timeMaxISO, max_results: 20,
+            }) as { events: Array<Record<string, unknown>>; count: number };
+
+            tenantDomain = briefingServiceMtg.inferDomainFromEvents(result.events);
+            if (tenantDomain) {
+              await this.deps.db.update(schema.tenants)
+                .set({ emailDomain: tenantDomain })
+                .where(eq(schema.tenants.id, tenantId));
+            }
+          }
+
+          if (tenantDomain) {
+            const calHandler = new GoogleCalendarHandler(tokenResult.accessToken);
+            const formatter = new Intl.DateTimeFormat("en-CA", {
+              timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit",
+            });
+            const dateStr = formatter.format(new Date());
+            const timeMinISO = new Date(`${dateStr}T00:00:00+00:00`).toISOString();
+            const timeMaxISO = new Date(`${dateStr}T23:59:59+00:00`).toISOString();
+            const result = await calHandler.execute("list_events", {
+              time_min: timeMinISO, time_max: timeMaxISO, max_results: 20,
+            }) as { events: Array<Record<string, unknown>>; count: number };
+
+            const meetings = briefingServiceMtg.extractExternalAttendees(result.events, tenantDomain);
+            if (meetings.length > 0) {
+              const pref = tenant.meetingBriefingPref as string | null;
+              if (pref === "disabled") {
+                // noop
+              } else if (pref === "pre_meeting") {
+                for (const meeting of meetings) {
+                  if (!meeting.startTime?.includes("T")) continue;
+                  const briefingTime = new Date(new Date(meeting.startTime).getTime() - 60 * 60 * 1000);
+                  if (briefingTime <= new Date()) continue;
+                  await this.deps.db.insert(schema.scheduledJobs).values({
+                    tenantId, jobType: "meeting_briefing", scheduleType: "once",
+                    scheduledAt: briefingTime,
+                    payload: {
+                      eventId: meeting.eventId, eventSummary: meeting.summary,
+                      startTime: meeting.startTime, attendees: meeting.attendees, tenantDomain,
+                    },
+                  });
+                }
+              } else {
+                // Default "morning" briefing
+                try {
+                  const briefing = await briefingServiceMtg.generateBriefing(meetings, tenantId, tenant.name, timezone);
+                  await adapter.sendMessage({
+                    tenantId, channel: channel as "telegram" | "whatsapp" | "app",
+                    recipient: recipient!, text: briefing,
+                  });
+                } catch (err) {
+                  logger.error({ err, tenantId }, "Failed to generate/send morning meeting briefing");
+                }
+              }
+            }
+
+            // Schedule evening profile scan
+            try {
+              const existingScan = await this.deps.db.query.scheduledJobs.findFirst({
+                where: and(
+                  eq(schema.scheduledJobs.tenantId, tenantId),
+                  eq(schema.scheduledJobs.jobType, "profile_scan"),
+                  eq(schema.scheduledJobs.status, "active"),
+                ),
+              });
+              if (!existingScan) {
+                const scanTime = nextUtcForLocalTime("18:00", timezone);
+                await this.deps.db.insert(schema.scheduledJobs).values({
+                  tenantId, jobType: "profile_scan", scheduleType: "once",
+                  scheduledAt: scanTime, payload: { tenantDomain },
+                });
+              }
+            } catch (err) {
+              logger.error({ err, tenantId }, "Failed to schedule profile scan from daily briefing");
+            }
+          }
+        }
+      }
+    } catch (err) {
+      logger.error({ err, tenantId }, "Daily briefing failed");
+    }
+
+    // Reschedule for tomorrow
+    await this.rescheduleDaily(job, timezone);
+  }
+
+  private async runMemoryScan(job: typeof schema.scheduledJobs.$inferSelect): Promise<void> {
+    const tenantId = job.tenantId;
+
+    const tenant = await this.deps.db.query.tenants.findFirst({
+      where: eq(schema.tenants.id, tenantId),
+    });
+    if (!tenant) {
+      logger.warn({ tenantId }, "Tenant not found for memory scan job");
+      return;
+    }
+
+    const timezone = tenant.timezone || "UTC";
+
+    const recipient = tenant.telegramUserId || tenant.phone;
+    const channel = tenant.telegramUserId ? "telegram" : "whatsapp";
+    if (!recipient) {
+      await this.rescheduleWeekly(job, timezone);
+      return;
+    }
+
+    const adapter = this.deps.adapters.find((a) => a.name === channel);
+    if (!adapter) {
+      await this.rescheduleWeekly(job, timezone);
+      return;
+    }
+
+    try {
+      const scanner = new MemoryScannerService({
+        memory: this.deps.memory,
+        googleApiKey: this.deps.googleApiKey,
+      });
+
+      const message = await scanner.scan(tenantId, tenant.name, timezone);
+
+      if (message) {
+        await adapter.sendMessage({
+          tenantId,
+          channel: channel as "telegram" | "whatsapp" | "app",
+          recipient,
+          text: message,
+        });
+        logger.info({ tenantId }, "Sent weekly memory scan nudge");
+      } else {
+        logger.info({ tenantId }, "Memory scan: not enough actionable items, silent skip");
+      }
+
+      if (this.deps.usageTracker) {
+        this.deps.usageTracker.logBackgroundJob({ tenantId, jobType: "memory_scan" }).catch(() => {});
+      }
+    } catch (err) {
+      logger.error({ err, tenantId }, "Memory scan failed");
+    }
+
+    await this.rescheduleWeekly(job, timezone);
+  }
+
+  private async rescheduleWeekly(job: typeof schema.scheduledJobs.$inferSelect, timezone: string): Promise<void> {
+    const localTime = job.recurrenceRule || "10:00";
+    // Schedule 7 days from now
+    const nextRun = new Date(nextUtcForLocalTime(localTime, timezone).getTime() + 6 * 86_400_000);
+
+    await this.deps.db.update(schema.scheduledJobs)
+      .set({ scheduledAt: nextRun, lastRunAt: new Date() })
+      .where(eq(schema.scheduledJobs.id, job.id));
+
+    logger.info({ jobId: job.id, nextRun: nextRun.toISOString() }, "Rescheduled weekly memory scan");
   }
 
   private async rescheduleEmailDigest(job: typeof schema.scheduledJobs.$inferSelect, timezone: string): Promise<void> {

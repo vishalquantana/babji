@@ -7,6 +7,7 @@ const EXTRACTION_PROMPT = `You are a memory extraction system. Analyze the conve
 - Preferences and habits (e.g. "prefers email over calls", "checks email first thing")
 - Personal details they share (timezone, location, role, industry)
 - Recurring topics or concerns
+- Dates, deadlines, and commitments (birthdays, anniversaries, follow-up dates, project deadlines)
 
 Rules:
 - Only extract FACTS, not opinions or transient info
@@ -15,6 +16,12 @@ Rules:
 - If there are no new facts worth remembering, return an empty array []
 - Keep each fact concise — one sentence max
 - Do NOT include facts about what Babji did (tool calls, responses). Only facts about the USER.
+- When a fact has a specific date or deadline, prefix it with [DATE: YYYY-MM-DD] tag
+- For recurring annual dates (birthdays, anniversaries), use the next upcoming occurrence
+- Examples of date-tagged facts:
+  - "[DATE: 2026-04-15] Mom's birthday is April 15"
+  - "[DATE: 2026-06-01] Project deadline for Acme Corp is June 1"
+  - "[DATE: 2026-03-20] Promised to follow up with Alice by March 20"
 
 Respond with ONLY the JSON array, no other text.`;
 

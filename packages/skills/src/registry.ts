@@ -883,6 +883,22 @@ const checkWithTeacherSkill: SkillDefinition = {
         },
       },
     },
+    {
+      name: "configure_briefing",
+      description: "Configure the daily morning briefing. The briefing includes calendar, emails, tasks, upcoming dates, and stale follow-ups. Runs every morning by default.",
+      parameters: {
+        mode: {
+          type: "string",
+          required: true,
+          description: "Briefing mode: 'morning' (full briefing, default), 'minimal' (calendar + tasks only), or 'off' (disable)",
+        },
+        time: {
+          type: "string",
+          required: false,
+          description: "Optional time override in HH:MM 24-hour format (e.g. '07:00'). Default is 08:00.",
+        },
+      },
+    },
   ],
   creditsPerAction: 0,
 };

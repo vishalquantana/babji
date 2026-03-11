@@ -18,6 +18,7 @@ import { logger } from "./logger.js";
 import { timezoneFromText } from "./city-timezone.js";
 import { timezoneFromPhone } from "./phone-timezone.js";
 import { ensureValidToken } from "./token-refresh.js";
+import { nextUtcForLocalTime } from "./job-runner.js";
 import type { UsageTracker } from "./usage-tracker.js";
 
 /** Pattern to detect "connect <something>" commands */
@@ -430,6 +431,70 @@ export class MessageHandler {
           if (actionName === "research_meeting_attendees") {
             return this.handleOnDemandBriefing(tenantId, tenant, params.meeting_query as string);
           }
+          if (actionName === "configure_briefing") {
+            const mode = params.mode as string;
+            const validModes = ["morning", "minimal", "off"];
+            if (!validModes.includes(mode)) {
+              return { success: false, error: "mode must be one of: " + validModes.join(", ") };
+            }
+
+            // Update tenant preference
+            await this.deps.db.update(schema.tenants)
+              .set({ briefingPref: mode } as Record<string, unknown>)
+              .where(eq(schema.tenants.id, tenantId));
+
+            const existingJob = await this.deps.db.query.scheduledJobs.findFirst({
+              where: and(
+                eq(schema.scheduledJobs.tenantId, tenantId),
+                eq(schema.scheduledJobs.jobType, "daily_briefing"),
+              ),
+            });
+
+            if (mode === "off") {
+              if (existingJob) {
+                await this.deps.db.update(schema.scheduledJobs)
+                  .set({ status: "paused" })
+                  .where(eq(schema.scheduledJobs.id, existingJob.id));
+              }
+              return { success: true, message: "Morning briefing turned off. Say 'turn on my briefing' to re-enable anytime." };
+            }
+
+            // Update or create the job
+            const customTime = params.time as string | undefined;
+            const tz = tenant.timezone || "UTC";
+
+            if (existingJob) {
+              const updates: Record<string, unknown> = { status: "active" };
+              if (customTime) {
+                updates.recurrenceRule = customTime;
+                updates.scheduledAt = nextUtcForLocalTime(customTime, tz);
+              }
+              await this.deps.db.update(schema.scheduledJobs)
+                .set(updates)
+                .where(eq(schema.scheduledJobs.id, existingJob.id));
+            } else {
+              const time = customTime || "08:00";
+              await this.deps.db.insert(schema.scheduledJobs).values({
+                tenantId,
+                jobType: "daily_briefing",
+                scheduleType: "daily",
+                scheduledAt: nextUtcForLocalTime(time, tz),
+                recurrenceRule: time,
+                payload: {},
+                status: "active",
+              });
+            }
+
+            const modeDesc: Record<string, string> = {
+              morning: "full briefing (calendar, emails, tasks, dates, follow-ups)",
+              minimal: "minimal briefing (calendar + tasks only)",
+            };
+            const timeMsg = customTime ? ` at ${customTime}` : "";
+            return {
+              success: true,
+              message: `Morning briefing set to ${modeDesc[mode]}${timeMsg}.`,
+            };
+          }
           if (actionName === "configure_email_digest") {
             const frequency = params.frequency as string;
             const validFreqs = ["morning_only", "morning_evening", "three_times", "off"];
@@ -473,7 +538,6 @@ export class MessageHandler {
                 .set({ recurrenceRule, status: "active" })
                 .where(eq(schema.scheduledJobs.id, existingJob.id));
             } else {
-              const { nextUtcForLocalTime } = await import("./job-runner.js");
               const tz = tenant.timezone || "UTC";
               const firstTime = recurrenceRule!.split(",")[0].trim();
               await this.deps.db.insert(schema.scheduledJobs).values({
@@ -715,6 +779,39 @@ export class MessageHandler {
         await this.deps.db.update(schema.tenants)
           .set({ onboardingPhase: "done" })
           .where(eq(schema.tenants.id, tenantId));
+
+        // Seed daily_briefing + memory_scan jobs for new tenant
+        const tz = tenant.timezone || "UTC";
+        setImmediate(async () => {
+          try {
+            await this.deps.db.insert(schema.scheduledJobs).values({
+              tenantId,
+              jobType: "daily_briefing",
+              scheduleType: "daily",
+              scheduledAt: nextUtcForLocalTime("08:00", tz),
+              recurrenceRule: "08:00",
+              payload: {},
+              status: "active",
+            });
+            // Weekly memory scan (Wednesday 10 AM local)
+            const nextRun = nextUtcForLocalTime("10:00", tz);
+            const dayOfWeek = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" }).format(nextRun);
+            const daysMap: Record<string, number> = { Sun: 3, Mon: 2, Tue: 1, Wed: 0, Thu: 6, Fri: 5, Sat: 4 };
+            const scheduledAt = new Date(nextRun.getTime() + (daysMap[dayOfWeek] || 0) * 86_400_000);
+            await this.deps.db.insert(schema.scheduledJobs).values({
+              tenantId,
+              jobType: "memory_scan",
+              scheduleType: "daily",
+              scheduledAt,
+              recurrenceRule: "10:00",
+              payload: {},
+              status: "active",
+            });
+            logger.info({ tenantId }, "Seeded daily_briefing + memory_scan for new tenant");
+          } catch (err) {
+            logger.error({ err, tenantId }, "Failed to seed jobs for new tenant");
+          }
+        });
 
         responseText += [
           "",
