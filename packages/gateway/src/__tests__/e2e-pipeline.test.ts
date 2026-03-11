@@ -28,12 +28,6 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
         { role: "user", content: "Hello", timestamp: new Date() },
       ]),
     },
-    credits: {
-      hasCredits: vi.fn().mockResolvedValue(true),
-      deduct: vi.fn().mockResolvedValue(undefined),
-      getDailyFreeAmount: vi.fn().mockResolvedValue(100),
-      getBalance: vi.fn().mockResolvedValue({ tenantId: "", dailyFree: 100, prepaid: 0, proMonthly: 0, total: 100 }),
-    },
     llm: {
       chat: vi.fn().mockResolvedValue({
         content: "Hi there! How can I help?",
@@ -80,6 +74,7 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     },
     oauthPortalUrl: "https://auth.babji.ai",
     googleClientId: "test-client-id",
+    atlassianClientId: "test-atlassian-client-id",
     ...overrides,
   };
 }
@@ -140,9 +135,9 @@ describe("E2E message pipeline", () => {
     });
   });
 
-  // 3. Tool call made -> credit deduction
-  describe("tool calls and credits", () => {
-    it("deducts credits when brain makes tool calls", async () => {
+  // 3. Tool call made -> processes correctly
+  describe("tool calls", () => {
+    it("processes tool calls and returns final response", async () => {
       const deps = makeDeps({
         tenantResolver: {
           resolveByPhone: vi.fn().mockResolvedValue({ id: "tenant-123" }),
@@ -168,47 +163,6 @@ describe("E2E message pipeline", () => {
       const result = await handler.handle(makeMessage({ text: "Check my email" }));
 
       expect(result.text).toBe("You have 3 emails.");
-      expect(deps.credits.hasCredits).toHaveBeenCalledWith("tenant-123", 1);
-      expect(deps.credits.deduct).toHaveBeenCalledWith(
-        "tenant-123",
-        1,
-        expect.stringContaining("list_emails"),
-      );
-    });
-
-    it("skips deduction when tenant has no credits", async () => {
-      const deps = makeDeps({
-        tenantResolver: {
-          resolveByPhone: vi.fn().mockResolvedValue({ id: "tenant-456" }),
-          resolveByTelegramId: vi.fn(),
-        },
-        credits: {
-          hasCredits: vi.fn().mockResolvedValue(false),
-          deduct: vi.fn(),
-          getDailyFreeAmount: vi.fn().mockResolvedValue(100),
-          getBalance: vi.fn().mockResolvedValue({ tenantId: "", dailyFree: 0, prepaid: 0, proMonthly: 0, total: 0 }),
-        },
-        llm: {
-          chat: vi
-            .fn()
-            .mockResolvedValueOnce({
-              content: "",
-              toolCalls: [
-                { id: "tc-1", skillName: "gmail", actionName: "send_email", parameters: {} },
-              ],
-            })
-            .mockResolvedValueOnce({
-              content: "Email sent!",
-              toolCalls: [],
-            }),
-        },
-      });
-      const handler = new MessageHandler(deps as any);
-
-      await handler.handle(makeMessage());
-
-      expect(deps.credits.hasCredits).toHaveBeenCalled();
-      expect(deps.credits.deduct).not.toHaveBeenCalled();
     });
   });
 

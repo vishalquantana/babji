@@ -6,7 +6,7 @@ import type { LlmClient } from "@babji/agent";
 import { MemoryManager, SessionStore } from "@babji/memory";
 
 import { TokenVault } from "@babji/crypto";
-import { GmailHandler, GoogleCalendarHandler, GoogleAdsHandler, GoogleAnalyticsHandler, PeopleHandler, TodosHandler, GeneralResearchHandler, ImageGenHandler, ImageStore } from "@babji/skills";
+import { GmailHandler, GoogleCalendarHandler, GoogleAdsHandler, GoogleAnalyticsHandler, JiraHandler, PeopleHandler, TodosHandler, GeneralResearchHandler, ImageGenHandler, ImageStore } from "@babji/skills";
 import type { S3Config } from "@babji/skills";
 import type { SkillRequestManager } from "@babji/skills";
 import type { Database } from "@babji/db";
@@ -47,6 +47,8 @@ const PROVIDER_ALIASES: Record<string, string> = {
   linkedin: "linkedin",
   x: "x",
   twitter: "x",
+  jira: "jira",
+  atlassian: "jira",
 };
 
 /**
@@ -101,6 +103,7 @@ export interface MessageHandlerDeps {
   vault: TokenVault;
   oauthPortalUrl: string;
   googleClientId: string;
+  atlassianClientId: string;
   googleAdsDeveloperToken: string;
   peopleConfig?: {
     enabled: boolean;
@@ -345,7 +348,7 @@ export class MessageHandler {
         const accessToken = tokenResult.accessToken;
 
         if (conn.provider === "gmail") {
-          toolExecutor.registerSkill("gmail", new GmailHandler(accessToken));
+          toolExecutor.registerSkill("gmail", new GmailHandler(accessToken, this.deps.db, tenantId));
         }
         if (conn.provider === "google_calendar") {
           toolExecutor.registerSkill("google_calendar", new GoogleCalendarHandler(accessToken));
@@ -359,6 +362,22 @@ export class MessageHandler {
         }
         if (conn.provider === "google_analytics") {
           toolExecutor.registerSkill("google_analytics", new GoogleAnalyticsHandler(accessToken));
+        }
+        if (conn.provider === "jira") {
+          // Retrieve cloudId stored alongside the token during OAuth callback
+          const tokenBlob = await this.deps.vault.retrieve(tenantId, "jira") as { cloud_id?: string } | null;
+          const cloudId = tokenBlob?.cloud_id;
+          if (cloudId) {
+            toolExecutor.registerSkill("jira", new JiraHandler(accessToken, cloudId));
+          } else {
+            logger.warn({ tenantId }, "Jira connected but no cloudId found — cannot register handler");
+            toolExecutor.registerSkill("jira", {
+              execute: async () => ({
+                error: true,
+                message: "Your Jira connection is missing the site identifier. Please reconnect by saying \"connect jira\".",
+              }),
+            });
+          }
         }
       }
 
@@ -401,7 +420,7 @@ export class MessageHandler {
             const raw = (params.service_name as string || "").toLowerCase().trim();
             const provider = matchProvider(raw);
             if (!provider) {
-              return { success: false, error: `Unknown service "${raw}". Available: gmail, google_calendar, google_ads, google_analytics` };
+              return { success: false, error: `Unknown service "${raw}". Available: gmail, google_calendar, google_ads, google_analytics, jira` };
             }
             const link = await this.generateConnectLink(tenantId, provider, channel, sender);
             return link;
@@ -885,6 +904,18 @@ export class MessageHandler {
       ],
       authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
     },
+    jira: {
+      displayName: "Jira",
+      scopes: [
+        "read:jira-work",
+        "write:jira-work",
+        "read:jira-user",
+        "read:servicedesk-request",
+        "write:servicedesk-request",
+        "offline_access",
+      ],
+      authUrl: "https://auth.atlassian.com/authorize",
+    },
   };
 
   /**
@@ -904,15 +935,23 @@ export class MessageHandler {
 
     const state = Buffer.from(JSON.stringify({ tenantId, provider, channel, sender })).toString("base64url");
     const redirectUri = `${this.deps.oauthPortalUrl}/api/callback/${provider}`;
+
+    // Build provider-specific OAuth params
+    const isAtlassian = provider === "jira";
+    const clientId = isAtlassian ? this.deps.atlassianClientId : this.deps.googleClientId;
     const params = new URLSearchParams({
-      client_id: this.deps.googleClientId,
+      client_id: clientId,
       redirect_uri: redirectUri,
       response_type: "code",
       scope: config.scopes.join(" "),
-      access_type: "offline",
       prompt: "consent",
       state,
     });
+    if (isAtlassian) {
+      params.set("audience", "api.atlassian.com");
+    } else {
+      params.set("access_type", "offline");
+    }
 
     const fullUrl = `${config.authUrl}?${params.toString()}`;
 

@@ -1,10 +1,17 @@
 import { google } from "googleapis";
+import { eq } from "drizzle-orm";
 import type { SkillHandler } from "@babji/agent";
+import type { Database } from "@babji/db";
+import { schema } from "@babji/db";
 
 export class GmailHandler implements SkillHandler {
   private gmail;
 
-  constructor(accessToken: string) {
+  constructor(
+    accessToken: string,
+    private db?: Database,
+    private tenantId?: string,
+  ) {
     const auth = new google.auth.OAuth2();
     auth.setCredentials({ access_token: accessToken });
     this.gmail = google.gmail({ version: "v1", auth });
@@ -35,9 +42,24 @@ export class GmailHandler implements SkillHandler {
       case "unsubscribe":
         this.requireParam(params, "message_id", actionName);
         return this.unsubscribe(params.message_id as string);
+      case "create_email_filter":
+        this.requireParam(params, "action", actionName);
+        return this.createEmailFilter(params);
+      case "list_email_filters":
+        return this.listEmailFilters();
+      case "delete_email_filter":
+        this.requireParam(params, "filter_id", actionName);
+        return this.deleteEmailFilter(params.filter_id as string);
       default:
         throw new Error(`Unknown Gmail action: ${actionName}`);
     }
+  }
+
+  private requireDb(): { db: Database; tenantId: string } {
+    if (!this.db || !this.tenantId) {
+      throw new Error("Email filter operations require database access. Please reconnect Gmail.");
+    }
+    return { db: this.db, tenantId: this.tenantId };
   }
 
   private requireParam(
@@ -216,6 +238,128 @@ export class GmailHandler implements SkillHandler {
     } catch (err) {
       this.wrapApiError("unsubscribe", err);
     }
+  }
+
+  private async createEmailFilter(params: Record<string, unknown>) {
+    const { db, tenantId } = this.requireDb();
+
+    const action = params.action as string;
+    const criteria: Record<string, unknown> = {};
+    if (params.from) criteria.from = params.from as string;
+    if (params.to) criteria.to = params.to as string;
+    if (params.subject) criteria.subject = params.subject as string;
+    if (params.query) criteria.query = params.query as string;
+    if (params.has_attachment) criteria.hasAttachment = true;
+
+    if (Object.keys(criteria).length === 0) {
+      throw new Error("At least one filter criteria is required (from, to, subject, query, or has_attachment)");
+    }
+
+    // Map action string to Gmail filter action object
+    const gmailAction: { removeLabelIds?: string[]; addLabelIds?: string[] } = {};
+    switch (action) {
+      case "archive":
+        gmailAction.removeLabelIds = ["INBOX"];
+        break;
+      case "trash":
+        gmailAction.addLabelIds = ["TRASH"];
+        break;
+      case "star":
+        gmailAction.addLabelIds = ["STARRED"];
+        break;
+      case "mark_read":
+        gmailAction.removeLabelIds = ["UNREAD"];
+        break;
+      case "label": {
+        const label = params.label as string;
+        if (!label) throw new Error("'label' parameter is required when action is 'label'");
+        gmailAction.addLabelIds = [label];
+        break;
+      }
+      default:
+        throw new Error(`Unknown filter action: ${action}. Use archive, trash, star, mark_read, or label.`);
+    }
+
+    try {
+      const res = await this.gmail.users.settings.filters.create({
+        userId: "me",
+        requestBody: { criteria, action: gmailAction },
+      });
+
+      const gmailFilterId = res.data.id!;
+      const description = (params.description as string) || `${action} emails matching: ${JSON.stringify(criteria)}`;
+
+      await db.insert(schema.emailFilters).values({
+        tenantId,
+        gmailFilterId,
+        description,
+        criteria,
+        actions: gmailAction,
+      });
+
+      return {
+        created: true,
+        filterId: gmailFilterId,
+        description,
+        criteria,
+        action,
+      };
+    } catch (err) {
+      this.wrapApiError("create_email_filter", err);
+    }
+  }
+
+  private async listEmailFilters() {
+    const { db, tenantId } = this.requireDb();
+
+    const filters = await db
+      .select()
+      .from(schema.emailFilters)
+      .where(eq(schema.emailFilters.tenantId, tenantId));
+
+    return {
+      filters: filters.map((f) => ({
+        id: f.id,
+        description: f.description,
+        criteria: f.criteria,
+        actions: f.actions,
+        createdAt: f.createdAt,
+      })),
+      total: filters.length,
+    };
+  }
+
+  private async deleteEmailFilter(filterId: string) {
+    const { db, tenantId } = this.requireDb();
+
+    const filter = await db
+      .select()
+      .from(schema.emailFilters)
+      .where(eq(schema.emailFilters.id, filterId))
+      .then((rows) => rows[0]);
+
+    if (!filter || filter.tenantId !== tenantId) {
+      throw new Error("Email filter not found");
+    }
+
+    try {
+      await this.gmail.users.settings.filters.delete({
+        userId: "me",
+        id: filter.gmailFilterId,
+      });
+    } catch (err) {
+      // If Gmail filter is already gone, still clean up our DB
+      const message = err instanceof Error ? err.message : "";
+      if (!message.includes("not found") && !message.includes("404")) {
+        this.wrapApiError("delete_email_filter", err);
+      }
+    }
+
+    await db
+      .delete(schema.emailFilters)
+      .where(eq(schema.emailFilters.id, filterId));
+
+    return { deleted: true, filterId, description: filter.description };
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

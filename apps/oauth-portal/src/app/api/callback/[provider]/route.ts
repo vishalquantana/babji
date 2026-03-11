@@ -75,6 +75,27 @@ export async function GET(
   const refreshToken: string | undefined = tokens.refresh_token;
   const expiresIn: number = tokens.expires_in || 3600;
 
+  // ── For Atlassian providers, fetch accessible resources to get cloudId ──
+  let cloudId: string | undefined;
+  if (providerName === "jira") {
+    try {
+      const resourcesRes = await fetch("https://api.atlassian.com/oauth/token/accessible-resources", {
+        headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+      });
+      if (resourcesRes.ok) {
+        const resources = await resourcesRes.json() as Array<{ id: string; url: string; name: string }>;
+        if (resources.length > 0) {
+          cloudId = resources[0].id;
+          console.log(`Atlassian cloudId resolved: ${cloudId} (${resources[0].name})`);
+        }
+      } else {
+        console.error("Failed to fetch accessible-resources:", resourcesRes.status);
+      }
+    } catch (err) {
+      console.error("Error fetching accessible-resources:", err);
+    }
+  }
+
   // ── Encrypt and store tokens ──
   const memoryBaseDir = process.env.MEMORY_BASE_DIR || "./data/tenants";
   const encryptionKey = process.env.ENCRYPTION_KEY || "";
@@ -84,6 +105,7 @@ export async function GET(
     access_token: accessToken,
     refresh_token: refreshToken,
     expires_at: Date.now() + expiresIn * 1000,
+    ...(cloudId ? { cloud_id: cloudId } : {}),
   });
 
   // ── Insert service_connections row ──

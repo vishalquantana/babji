@@ -97,6 +97,7 @@ async function main() {
     vault,
     oauthPortalUrl: process.env.OAUTH_PORTAL_URL || "https://babji.quantana.top",
     googleClientId: process.env.GOOGLE_CLIENT_ID || "",
+    atlassianClientId: process.env.ATLASSIAN_CLIENT_ID || "",
     googleAdsDeveloperToken: config.googleAdsDeveloperToken,
     peopleConfig: config.people,
     googleApiKey: config.googleApiKey,

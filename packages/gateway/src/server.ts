@@ -77,6 +77,10 @@ export function createServer({ config, db, handler, adapters }: ServerDeps) {
         displayName: "Google Calendar",
         prompt: "I just connected my Google Calendar. Show me what's on my calendar for the rest of today and tomorrow.",
       },
+      jira: {
+        displayName: "Jira",
+        prompt: "I just connected my Jira account. Show me my currently assigned issues — what's in progress, what's waiting, and anything that needs attention.",
+      },
     };
     const meta = providerMeta[provider] || {
       displayName: provider,
@@ -217,6 +221,40 @@ export function createServer({ config, db, handler, adapters }: ServerDeps) {
         }
       } catch (err) {
         logger.error({ err, tenantId }, "Failed to seed email/briefing jobs on Gmail connect");
+      }
+    }
+
+    // Auto-seed daily Jira report when Jira is connected
+    if (provider === "jira" && db) {
+      try {
+        const existingJiraReport = await db.query.scheduledJobs.findFirst({
+          where: and(
+            eq(schema.scheduledJobs.tenantId, tenantId),
+            eq(schema.scheduledJobs.jobType, "daily_jira_report"),
+          ),
+        });
+
+        if (!existingJiraReport) {
+          const tenant = await db.query.tenants.findFirst({
+            where: eq(schema.tenants.id, tenantId),
+          });
+          const timezone = tenant?.timezone || "UTC";
+          const scheduledAt = nextUtcForLocalTime("09:00", timezone);
+
+          await db.insert(schema.scheduledJobs).values({
+            tenantId,
+            jobType: "daily_jira_report",
+            scheduleType: "daily",
+            scheduledAt,
+            recurrenceRule: "09:00",
+            payload: {},
+            status: "active",
+          });
+
+          logger.info({ tenantId, scheduledAt: scheduledAt.toISOString() }, "Seeded daily Jira report job on Jira connect");
+        }
+      } catch (err) {
+        logger.error({ err, tenantId }, "Failed to seed daily Jira report job");
       }
     }
     // Fire and forget — don't block the OAuth callback

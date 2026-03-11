@@ -237,6 +237,9 @@ importers:
 
   packages/gateway:
     dependencies:
+      '@ai-sdk/google':
+        specifier: ^3.0.43
+        version: 3.0.43(zod@4.3.6)
       '@babji/agent':
         specifier: workspace:*
         version: link:../agent
@@ -261,6 +264,9 @@ importers:
       '@hapi/boom':
         specifier: ^10.0.0
         version: 10.0.1
+      ai:
+        specifier: ^6.0.116
+        version: 6.0.116(zod@4.3.6)
       baileys:
         specifier: ^6.7.21
         version: 6.17.16(eslint@9.39.3(jiti@2.6.1))(typescript@5.9.3)
@@ -270,6 +276,9 @@ importers:
       fastify:
         specifier: ^5.0.0
         version: 5.8.1
+      googleapis:
+        specifier: ^144.0.0
+        version: 144.0.0
       grammy:
         specifier: ^1.30.0
         version: 1.41.1

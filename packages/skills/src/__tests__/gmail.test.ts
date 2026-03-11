@@ -4,7 +4,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockMessagesList = vi.fn();
 const mockMessagesGet = vi.fn();
 const mockMessagesSend = vi.fn();
+const mockMessagesModify = vi.fn();
 const mockFiltersCreate = vi.fn();
+const mockFiltersDelete = vi.fn();
 
 vi.mock("googleapis", () => {
   const gmailClient = {
@@ -13,10 +15,12 @@ vi.mock("googleapis", () => {
         list: (...args: unknown[]) => mockMessagesList(...args),
         get: (...args: unknown[]) => mockMessagesGet(...args),
         send: (...args: unknown[]) => mockMessagesSend(...args),
+        modify: (...args: unknown[]) => mockMessagesModify(...args),
       },
       settings: {
         filters: {
           create: (...args: unknown[]) => mockFiltersCreate(...args),
+          delete: (...args: unknown[]) => mockFiltersDelete(...args),
         },
       },
     },
@@ -369,6 +373,223 @@ describe("GmailHandler", () => {
       await expect(
         handler.execute("unsubscribe", { message_id: "gone" })
       ).rejects.toThrow("Gmail unsubscribe failed: message not found");
+    });
+  });
+
+  // -------- email filter CRUD --------
+
+  describe("create_email_filter", () => {
+    const mockDb = {
+      insert: vi.fn().mockReturnValue({
+        values: vi.fn().mockResolvedValue(undefined),
+      }),
+      select: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    it("creates Gmail filter and saves to DB", async () => {
+      mockFiltersCreate.mockResolvedValue({ data: { id: "gmail-filter-1" } });
+
+      const dbHandler = new GmailHandler("fake-token", mockDb as never, "tenant-1");
+      const result = (await dbHandler.execute("create_email_filter", {
+        subject: "[JIRA]",
+        action: "archive",
+        description: "Auto-archive JIRA emails",
+      })) as Record<string, unknown>;
+
+      expect(result.created).toBe(true);
+      expect(result.filterId).toBe("gmail-filter-1");
+      expect(result.description).toBe("Auto-archive JIRA emails");
+      expect(result.action).toBe("archive");
+
+      expect(mockFiltersCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: "me",
+          requestBody: {
+            criteria: { subject: "[JIRA]" },
+            action: { removeLabelIds: ["INBOX"] },
+          },
+        })
+      );
+
+      expect(mockDb.insert).toHaveBeenCalled();
+    });
+
+    it("supports trash action", async () => {
+      mockFiltersCreate.mockResolvedValue({ data: { id: "gmail-filter-2" } });
+
+      const dbHandler = new GmailHandler("fake-token", mockDb as never, "tenant-1");
+      await dbHandler.execute("create_email_filter", {
+        from: "spam@example.com",
+        action: "trash",
+      });
+
+      expect(mockFiltersCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestBody: {
+            criteria: { from: "spam@example.com" },
+            action: { addLabelIds: ["TRASH"] },
+          },
+        })
+      );
+    });
+
+    it("supports star action", async () => {
+      mockFiltersCreate.mockResolvedValue({ data: { id: "gmail-filter-3" } });
+
+      const dbHandler = new GmailHandler("fake-token", mockDb as never, "tenant-1");
+      await dbHandler.execute("create_email_filter", {
+        from: "boss@company.com",
+        action: "star",
+      });
+
+      expect(mockFiltersCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestBody: {
+            criteria: { from: "boss@company.com" },
+            action: { addLabelIds: ["STARRED"] },
+          },
+        })
+      );
+    });
+
+    it("supports label action with label name", async () => {
+      mockFiltersCreate.mockResolvedValue({ data: { id: "gmail-filter-4" } });
+
+      const dbHandler = new GmailHandler("fake-token", mockDb as never, "tenant-1");
+      await dbHandler.execute("create_email_filter", {
+        from: "updates@github.com",
+        action: "label",
+        label: "GitHub",
+      });
+
+      expect(mockFiltersCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestBody: {
+            criteria: { from: "updates@github.com" },
+            action: { addLabelIds: ["GitHub"] },
+          },
+        })
+      );
+    });
+
+    it("requires label param when action is label", async () => {
+      const dbHandler = new GmailHandler("fake-token", mockDb as never, "tenant-1");
+      await expect(
+        dbHandler.execute("create_email_filter", {
+          from: "x@y.com",
+          action: "label",
+        })
+      ).rejects.toThrow("'label' parameter is required when action is 'label'");
+    });
+
+    it("requires at least one criteria", async () => {
+      const dbHandler = new GmailHandler("fake-token", mockDb as never, "tenant-1");
+      await expect(
+        dbHandler.execute("create_email_filter", { action: "archive" })
+      ).rejects.toThrow("At least one filter criteria is required");
+    });
+
+    it("requires action parameter", async () => {
+      await expect(
+        handler.execute("create_email_filter", { from: "x@y.com" })
+      ).rejects.toThrow("Missing required parameter: action for create_email_filter");
+    });
+
+    it("throws when no db is provided", async () => {
+      await expect(
+        handler.execute("create_email_filter", { from: "x@y.com", action: "archive" })
+      ).rejects.toThrow("Email filter operations require database access");
+    });
+  });
+
+  describe("list_email_filters", () => {
+    it("returns filters from DB", async () => {
+      const mockWhere = vi.fn().mockResolvedValue([
+        {
+          id: "filter-1",
+          description: "Auto-archive JIRA",
+          criteria: { subject: "[JIRA]" },
+          actions: { removeLabelIds: ["INBOX"] },
+          createdAt: new Date("2026-03-11"),
+        },
+      ]);
+      const mockFrom = vi.fn().mockReturnValue({ where: mockWhere });
+      const mockDb = {
+        insert: vi.fn(),
+        select: vi.fn().mockReturnValue({ from: mockFrom }),
+        delete: vi.fn(),
+      };
+
+      const dbHandler = new GmailHandler("fake-token", mockDb as never, "tenant-1");
+      const result = (await dbHandler.execute("list_email_filters", {})) as {
+        filters: Array<Record<string, unknown>>;
+        total: number;
+      };
+
+      expect(result.total).toBe(1);
+      expect(result.filters[0].id).toBe("filter-1");
+      expect(result.filters[0].description).toBe("Auto-archive JIRA");
+    });
+
+    it("throws when no db is provided", async () => {
+      await expect(
+        handler.execute("list_email_filters", {})
+      ).rejects.toThrow("Email filter operations require database access");
+    });
+  });
+
+  describe("delete_email_filter", () => {
+    it("deletes from Gmail and DB", async () => {
+      const mockDeleteWhere = vi.fn().mockResolvedValue(undefined);
+      const mockSelectThen = vi.fn().mockResolvedValue({
+        id: "filter-1",
+        tenantId: "tenant-1",
+        gmailFilterId: "gmail-f-1",
+        description: "Auto-archive JIRA",
+      });
+      const mockSelectWhere = vi.fn().mockReturnValue({ then: mockSelectThen });
+      const mockSelectFrom = vi.fn().mockReturnValue({ where: mockSelectWhere });
+      const mockDb = {
+        insert: vi.fn(),
+        select: vi.fn().mockReturnValue({ from: mockSelectFrom }),
+        delete: vi.fn().mockReturnValue({ where: mockDeleteWhere }),
+      };
+      mockFiltersDelete.mockResolvedValue({});
+
+      const dbHandler = new GmailHandler("fake-token", mockDb as never, "tenant-1");
+      const result = (await dbHandler.execute("delete_email_filter", {
+        filter_id: "filter-1",
+      })) as Record<string, unknown>;
+
+      expect(result.deleted).toBe(true);
+      expect(result.description).toBe("Auto-archive JIRA");
+      expect(mockFiltersDelete).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: "me", id: "gmail-f-1" })
+      );
+      expect(mockDb.delete).toHaveBeenCalled();
+    });
+
+    it("requires filter_id parameter", async () => {
+      await expect(
+        handler.execute("delete_email_filter", {})
+      ).rejects.toThrow("Missing required parameter: filter_id for delete_email_filter");
+    });
+
+    it("throws when filter not found", async () => {
+      const mockSelectThen = vi.fn().mockResolvedValue(undefined);
+      const mockSelectWhere = vi.fn().mockReturnValue({ then: mockSelectThen });
+      const mockSelectFrom = vi.fn().mockReturnValue({ where: mockSelectWhere });
+      const mockDb = {
+        insert: vi.fn(),
+        select: vi.fn().mockReturnValue({ from: mockSelectFrom }),
+        delete: vi.fn(),
+      };
+
+      const dbHandler = new GmailHandler("fake-token", mockDb as never, "tenant-1");
+      await expect(
+        dbHandler.execute("delete_email_filter", { filter_id: "nonexistent" })
+      ).rejects.toThrow("Email filter not found");
     });
   });
 

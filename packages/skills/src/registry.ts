@@ -99,6 +99,68 @@ const gmailSkill: SkillDefinition = {
         },
       },
     },
+    {
+      name: "create_email_filter",
+      description: "Create an automatic email filter rule. The rule runs in Gmail 24/7 — matching emails are processed automatically.",
+      parameters: {
+        from: {
+          type: "string",
+          required: false,
+          description: "Match emails from this sender (email or domain)",
+        },
+        to: {
+          type: "string",
+          required: false,
+          description: "Match emails sent to this address",
+        },
+        subject: {
+          type: "string",
+          required: false,
+          description: "Match emails with this text in the subject",
+        },
+        query: {
+          type: "string",
+          required: false,
+          description: "Gmail search query for advanced matching (e.g. 'has:attachment larger:5M')",
+        },
+        has_attachment: {
+          type: "boolean",
+          required: false,
+          description: "Match only emails with attachments",
+        },
+        action: {
+          type: "string",
+          required: true,
+          description: "What to do with matching emails: 'archive' (skip inbox), 'trash', 'star', 'mark_read', or 'label'",
+        },
+        label: {
+          type: "string",
+          required: false,
+          description: "Label name to apply (required when action is 'label')",
+        },
+        description: {
+          type: "string",
+          required: false,
+          description: "Human-readable description of this rule",
+        },
+      },
+    },
+    {
+      name: "list_email_filters",
+      description: "List all email filter rules the user has set up through Babji.",
+      parameters: {},
+    },
+    {
+      name: "delete_email_filter",
+      description: "Delete an email filter rule by its ID.",
+      parameters: {
+        filter_id: {
+          type: "string",
+          required: true,
+          description: "The filter ID to delete (from list_email_filters)",
+        },
+      },
+    },
   ],
   creditsPerAction: 1,
 };
@@ -716,7 +778,7 @@ const checkWithTeacherSkill: SkillDefinition = {
         service_name: {
           type: "string",
           required: true,
-          description: "The service to connect. One of: gmail, google_calendar, google_ads, google_analytics",
+          description: "The service to connect. One of: gmail, google_calendar, google_ads, google_analytics, jira",
         },
       },
     },
@@ -1037,7 +1099,169 @@ const imageGenSkill: SkillDefinition = {
   creditsPerAction: 1,
 };
 
-const allSkills: SkillDefinition[] = [gmailSkill, calendarSkill, googleAdsSkill, googleAnalyticsSkill, checkWithTeacherSkill, peopleSkill, generalResearchSkill, imageGenSkill];
+const jiraSkill: SkillDefinition = {
+  name: "jira",
+  displayName: "Jira",
+  description: "Search, create, update, and manage Jira issues and projects.",
+  requiresAuth: {
+    provider: "jira",
+    scopes: ["read:jira-work", "write:jira-work", "read:jira-user"],
+  },
+  actions: [
+    {
+      name: "search_issues",
+      description: "Search Jira issues using JQL (Jira Query Language). Default: your assigned open issues.",
+      parameters: {
+        jql: {
+          type: "string",
+          required: false,
+          description: "JQL query string. Examples: 'project = BAB AND status != Done', 'assignee = currentUser()', 'status = \"In Progress\"'. Default: assigned open issues.",
+        },
+        max_results: {
+          type: "number",
+          required: false,
+          description: "Maximum issues to return (1-50, default 20)",
+        },
+      },
+    },
+    {
+      name: "get_issue",
+      description: "Get full details of a Jira issue including description, status, comments, and assignee.",
+      parameters: {
+        issue_key: {
+          type: "string",
+          required: true,
+          description: "The issue key (e.g. 'BAB-36', 'PX4D-4914')",
+        },
+      },
+    },
+    {
+      name: "create_issue",
+      description: "Create a new Jira issue in a project.",
+      parameters: {
+        project_key: {
+          type: "string",
+          required: true,
+          description: "Project key (e.g. 'BAB', 'PX4D')",
+        },
+        summary: {
+          type: "string",
+          required: true,
+          description: "Issue title/summary",
+        },
+        issue_type: {
+          type: "string",
+          required: false,
+          description: "Issue type: Task (default), Bug, Story, Epic",
+        },
+        description: {
+          type: "string",
+          required: false,
+          description: "Detailed description of the issue",
+        },
+        priority: {
+          type: "string",
+          required: false,
+          description: "Priority: Highest, High, Medium (default), Low, Lowest",
+        },
+        labels: {
+          type: "array",
+          required: false,
+          description: "Labels to add to the issue",
+          items: { type: "string" },
+        },
+      },
+    },
+    {
+      name: "update_issue",
+      description: "Update fields on an existing Jira issue.",
+      parameters: {
+        issue_key: {
+          type: "string",
+          required: true,
+          description: "The issue key (e.g. 'BAB-36')",
+        },
+        summary: {
+          type: "string",
+          required: false,
+          description: "New summary/title",
+        },
+        description: {
+          type: "string",
+          required: false,
+          description: "New description text",
+        },
+        priority: {
+          type: "string",
+          required: false,
+          description: "New priority: Highest, High, Medium, Low, Lowest",
+        },
+        labels: {
+          type: "array",
+          required: false,
+          description: "Replace labels with these values",
+          items: { type: "string" },
+        },
+      },
+    },
+    {
+      name: "transition_issue",
+      description: "Move an issue to a different status (e.g. To Do, In Progress, Done, Approved to Build, Ready for QA).",
+      parameters: {
+        issue_key: {
+          type: "string",
+          required: true,
+          description: "The issue key (e.g. 'BAB-36')",
+        },
+        transition_name: {
+          type: "string",
+          required: true,
+          description: "Target status name: 'To Do', 'In Progress', 'Done', 'Approved to Build', 'Ready for QA'",
+        },
+      },
+    },
+    {
+      name: "add_comment",
+      description: "Add a comment to a Jira issue.",
+      parameters: {
+        issue_key: {
+          type: "string",
+          required: true,
+          description: "The issue key (e.g. 'BAB-36')",
+        },
+        comment: {
+          type: "string",
+          required: true,
+          description: "Comment text to add",
+        },
+      },
+    },
+    {
+      name: "list_projects",
+      description: "List all Jira projects the user has access to.",
+      parameters: {},
+    },
+    {
+      name: "assign_issue",
+      description: "Assign or unassign a Jira issue. To unassign, omit assignee_account_id.",
+      parameters: {
+        issue_key: {
+          type: "string",
+          required: true,
+          description: "The issue key (e.g. 'BAB-36')",
+        },
+        assignee_account_id: {
+          type: "string",
+          required: false,
+          description: "Atlassian account ID of the assignee. Omit to unassign.",
+        },
+      },
+    },
+  ],
+  creditsPerAction: 1,
+};
+
+const allSkills: SkillDefinition[] = [gmailSkill, calendarSkill, googleAdsSkill, googleAnalyticsSkill, jiraSkill, checkWithTeacherSkill, peopleSkill, generalResearchSkill, imageGenSkill];
 
 /**
  * Load all registered skill definitions.

@@ -78,6 +78,22 @@ export const providers: Record<string, ProviderConfig> = {
     authUrl: "https://twitter.com/i/oauth2/authorize",
     tokenUrl: "https://api.twitter.com/2/oauth2/token",
   },
+  jira: {
+    displayName: "Jira",
+    description: "Read, create, and manage Jira issues",
+    clientIdEnv: "ATLASSIAN_CLIENT_ID",
+    clientSecretEnv: "ATLASSIAN_CLIENT_SECRET",
+    scopes: [
+      "read:jira-work",
+      "write:jira-work",
+      "read:jira-user",
+      "read:servicedesk-request",
+      "write:servicedesk-request",
+      "offline_access",
+    ],
+    authUrl: "https://auth.atlassian.com/authorize",
+    tokenUrl: "https://auth.atlassian.com/oauth/token",
+  },
 };
 
 export function getProvider(name: string): ProviderConfig | undefined {
