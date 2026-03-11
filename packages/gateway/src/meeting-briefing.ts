@@ -87,9 +87,13 @@ export class MeetingBriefingService {
         // Skip already-seen
         if (seenEmails.has(email.toLowerCase())) continue;
 
-        // Skip same domain
+        // Skip same organization (match base domain name across all TLDs)
+        // e.g. quantana.in, quantana.com.au, quantana.us all match "quantana"
         const domain = email.split("@")[1]?.toLowerCase();
-        if (!domain || domain === tenantDomain.toLowerCase()) continue;
+        if (!domain) continue;
+        const tenantBase = tenantDomain.toLowerCase().split(".")[0];
+        const attendeeBase = domain.split(".")[0];
+        if (attendeeBase === tenantBase) continue;
 
         seenEmails.add(email.toLowerCase());
         externals.push({
