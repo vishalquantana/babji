@@ -36,6 +36,7 @@ export const tenants = pgTable(
     emailDomain: varchar("email_domain", { length: 100 }),
     meetingBriefingPref: varchar("meeting_briefing_pref", { length: 20 }).default("morning"),
     briefingPref: varchar("briefing_pref", { length: 20 }).default("morning"),
+    jiraReportPref: varchar("jira_report_pref", { length: 20 }).default("morning"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     lastActiveAt: timestamp("last_active_at").notNull().defaultNow(),
   },
@@ -242,6 +243,24 @@ export const reports = pgTable(
   },
   (table) => [
     index("idx_reports_tenant").on(table.tenantId),
+  ]
+);
+
+export const emailFilters = pgTable(
+  "email_filters",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    gmailFilterId: text("gmail_filter_id").notNull(),
+    description: text("description").notNull(),
+    criteria: jsonb("criteria").$type<Record<string, unknown>>().notNull(),
+    actions: jsonb("actions").$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_email_filters_tenant").on(table.tenantId),
   ]
 );
 
