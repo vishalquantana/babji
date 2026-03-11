@@ -130,6 +130,15 @@ export class PromptBuilder {
     parts.push("- When the user says 'change my briefing time', 'turn off morning briefing', 'make it shorter', etc., use configure_briefing");
     parts.push("");
 
+    // Jira report section (only when Jira is connected)
+    if (ctx.connections.includes("jira")) {
+      parts.push("## Jira daily report");
+      parts.push("Babji sends a daily Jira report every morning (default 09:00) with your assigned open issues and recent activity in your projects.");
+      parts.push("- Use babji.configure_jira_report to change the time or turn off");
+      parts.push("- When the user mentions 'Jira report', 'change Jira report time', or 'turn off Jira updates', use configure_jira_report");
+      parts.push("");
+    }
+
     // Email digest section (only when Gmail is connected)
     if (ctx.gmailConnected) {
       parts.push("## Email digest");
