@@ -92,6 +92,25 @@ export class TodosHandler implements SkillHandler {
 
     // --- Recurring reminder path ---
     if (recurrence) {
+      // Dedup: check if there's already a pending recurring todo with the same title
+      const existingTodos = await this.db.query.todos.findMany({
+        where: and(
+          eq(schema.todos.tenantId, this.tenantId),
+          eq(schema.todos.status, "pending"),
+        ),
+      });
+      const normalizedTitle = title.toLowerCase().trim();
+      const duplicate = existingTodos.find((t) => {
+        if (!t.reminderJobId) return false; // only match recurring todos
+        return t.title.toLowerCase().trim() === normalizedTitle;
+      });
+      if (duplicate) {
+        return {
+          success: false,
+          error: `A recurring reminder with the same title already exists (id: ${duplicate.id}). Use update_task to modify it, or delete_task to remove it first.`,
+        };
+      }
+
       const [todo] = await this.db.insert(schema.todos).values({
         tenantId: this.tenantId,
         title,
