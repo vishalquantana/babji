@@ -21,6 +21,11 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     memory: {
       readSoul: vi.fn().mockResolvedValue("You are Babji."),
       readMemory: vi.fn().mockResolvedValue(""),
+      appendMemory: vi.fn().mockResolvedValue(undefined),
+      listPeople: vi.fn().mockResolvedValue([]),
+      readPerson: vi.fn().mockResolvedValue(null),
+      writePerson: vi.fn().mockResolvedValue(undefined),
+      findPersonByEmail: vi.fn().mockResolvedValue(null),
     },
     sessions: {
       append: vi.fn().mockResolvedValue(undefined),

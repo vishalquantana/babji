@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { eq, and, isNull } from "drizzle-orm";
 import type { BabjiMessage, OutboundMessage, SkillDefinition } from "@babji/types";
 import { Brain, PromptBuilder, ToolExecutor, skillsToAiTools, MemoryExtractor } from "@babji/agent";
-import type { LlmClient } from "@babji/agent";
+import type { LlmClient, PersonFact } from "@babji/agent";
 import { MemoryManager, SessionStore } from "@babji/memory";
 
 import { TokenVault } from "@babji/crypto";
@@ -640,6 +640,38 @@ export class MessageHandler {
               message: `Daily Jira report ${mode === "on" ? "enabled" : "updated"} -- you'll get it at ${effectiveTime} every morning. Say 'change my Jira report time' to adjust.`,
             };
           }
+          if (actionName === "recall_person") {
+            const name = params.name as string;
+            const email = params.email as string | undefined;
+
+            // Try by email first (exact match)
+            if (email) {
+              const person = await this.deps.memory.findPersonByEmail(tenantId, email);
+              if (person) {
+                return { found: true, ...person };
+              }
+            }
+
+            // Try by name slug
+            const slug = MemoryManager.slugifyName(name);
+            const person = await this.deps.memory.readPerson(tenantId, slug);
+            if (person) {
+              return { found: true, ...person };
+            }
+
+            // Fuzzy: search all people for partial name match
+            const allPeople = await this.deps.memory.listPeople(tenantId);
+            const lower = name.toLowerCase();
+            const match = allPeople.find(p =>
+              p.name.toLowerCase().includes(lower) ||
+              p.aliases.some(a => a.toLowerCase().includes(lower))
+            );
+            if (match) {
+              return { found: true, ...match };
+            }
+
+            return { found: false, message: `No information found about "${name}". I'll start remembering details about them from our future conversations.` };
+          }
           throw new Error(`Unknown babji action: ${actionName}`);
         },
       });
@@ -820,30 +852,49 @@ export class MessageHandler {
       setImmediate(async () => {
         try {
           const extractor = new MemoryExtractor(this.deps.llmLite);
-          const facts = await extractor.extract({
+
+          // Build people context for dedup
+          const existingPeople = await this.deps.memory.listPeople(tenantId);
+          const peopleSummary = existingPeople.map(p => ({
+            name: p.name,
+            email: p.email,
+            factsSummary: p.facts.slice(-3).join("; ") || "no facts yet",
+          }));
+
+          const extraction = await extractor.extractWithPeople({
             existingMemory: memoryContent,
+            existingPeople: peopleSummary,
             conversationMessages: [
               { role: "user", content: message.text },
               { role: "assistant", content: result.content },
             ],
+            source: "chat",
           });
-          if (facts.length > 0) {
-            for (const fact of facts) {
+
+          // Store general facts in MEMORY.md (same as before)
+          if (extraction.generalFacts.length > 0) {
+            for (const fact of extraction.generalFacts) {
               await this.deps.memory.appendMemory(tenantId, fact);
             }
-            logger.info({ tenantId, facts: facts.length }, "Extracted new memories");
+            logger.info({ tenantId, facts: extraction.generalFacts.length }, "Extracted general memories");
+          }
 
-            // If timezone is still UTC, try to detect from extracted location facts
-            if (currentTz === "UTC") {
-              for (const fact of facts) {
-                const detectedTz = timezoneFromText(fact);
-                if (detectedTz) {
-                  await this.deps.db.update(schema.tenants)
-                    .set({ timezone: detectedTz })
-                    .where(eq(schema.tenants.id, tenantId));
-                  logger.info({ tenantId, timezone: detectedTz, fact }, "Auto-detected timezone from conversation");
-                  break;
-                }
+          // Store people facts in person files
+          if (extraction.peopleFacts.length > 0) {
+            await this.storePeopleFacts(tenantId, extraction.peopleFacts);
+            logger.info({ tenantId, people: extraction.peopleFacts.length }, "Extracted people memories");
+          }
+
+          // Timezone auto-detect from general facts (same as before)
+          if (currentTz === "UTC") {
+            for (const fact of extraction.generalFacts) {
+              const detectedTz = timezoneFromText(fact);
+              if (detectedTz) {
+                await this.deps.db.update(schema.tenants)
+                  .set({ timezone: detectedTz })
+                  .where(eq(schema.tenants.id, tenantId));
+                logger.info({ tenantId, timezone: detectedTz, fact }, "Auto-detected timezone from conversation");
+                break;
               }
             }
           }
@@ -1177,6 +1228,31 @@ export class MessageHandler {
       }
     }
     return null;
+  }
+
+  /**
+   * Store people-specific facts into individual person files.
+   */
+  private async storePeopleFacts(tenantId: string, peopleFacts: PersonFact[]): Promise<void> {
+    const datestamp = new Date().toISOString().split("T")[0];
+    for (const pf of peopleFacts) {
+      const slug = MemoryManager.slugifyName(pf.person);
+      const existing = await this.deps.memory.readPerson(tenantId, slug)
+        ?? await this.deps.memory.findPersonByEmail(tenantId, pf.email);
+
+      const person = existing ?? {
+        name: pf.person, email: pf.email, company: pf.company,
+        role: pf.role, aliases: [], facts: [], dates: [], interactions: [],
+      };
+
+      for (const fact of pf.facts) person.facts.push(`[${datestamp}] ${fact}`);
+      for (const date of pf.dates) person.dates.push(`[${date}]`);
+      if (pf.company && !person.company) person.company = pf.company;
+      if (pf.role && !person.role) person.role = pf.role;
+      if (pf.email && !person.email) person.email = pf.email;
+
+      await this.deps.memory.writePerson(tenantId, person);
+    }
   }
 
   /**

@@ -977,6 +977,22 @@ const checkWithTeacherSkill: SkillDefinition = {
         },
       },
     },
+    {
+      name: "recall_person",
+      description: "Look up everything Babji knows about a person — facts, dates, interaction history. Use this when the user mentions someone by name and you need context, or when they ask 'who is X?', 'when did I last talk to X?', 'what do I know about X?'. Also use before drafting emails to someone, to personalize the message.",
+      parameters: {
+        name: {
+          type: "string",
+          required: true,
+          description: "The person's name to look up (first name, last name, or full name)",
+        },
+        email: {
+          type: "string",
+          required: false,
+          description: "Optional email address for more precise matching",
+        },
+      },
+    },
   ],
   creditsPerAction: 0,
 };
