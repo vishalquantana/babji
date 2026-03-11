@@ -591,6 +591,20 @@ export class MessageHandler {
         context: r.context,
       }));
 
+
+      // Read pending email drafts for prompt injection
+      const memoryBaseDir = process.env.MEMORY_BASE_DIR || "./data/tenants";
+      const { EmailDigestRunner } = await import("./email-digest.js");
+      const pendingDraftsFile = await EmailDigestRunner.readPendingDrafts(memoryBaseDir, tenantId);
+      const pendingDrafts = pendingDraftsFile ? {
+        items: pendingDraftsFile.items.map((d) => ({
+          index: d.index,
+          to: d.to,
+          subject: d.subject,
+          draftReply: d.draftReply,
+        })),
+      } : undefined;
+      const gmailConnected = connectedProviders.includes("gmail");
       // Build system prompt from soul + memory + skills
       const systemPrompt = PromptBuilder.build({
         soul,
@@ -600,6 +614,8 @@ export class MessageHandler {
         userName: tenant.name,
         timezone: tenant.timezone ?? "UTC",
         completedSkillRequests,
+        pendingDrafts,
+        gmailConnected,
       });
 
       // Create per-request Brain with the tenant's ToolExecutor

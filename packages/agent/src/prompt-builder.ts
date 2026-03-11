@@ -8,6 +8,15 @@ interface PromptContext {
   userName?: string;
   timezone?: string;
   completedSkillRequests?: Array<{ skillName: string; context: string }>;
+  pendingDrafts?: {
+    items: Array<{
+      index: number;
+      to: string;
+      subject: string;
+      draftReply: string;
+    }>;
+  };
+  gmailConnected?: boolean;
 }
 
 export class PromptBuilder {
@@ -113,6 +122,31 @@ export class PromptBuilder {
     parts.push("- Use babji.disable_meeting_briefings if the user wants to turn them off");
     parts.push("- If the user asks to stop or disable briefings, use disable_meeting_briefings immediately -- do not push back");
     parts.push("");
+
+    // Email digest section (only when Gmail is connected)
+    if (ctx.gmailConnected) {
+      parts.push("## Email digest");
+      parts.push("Babji checks your email automatically and sends digests of what needs attention.");
+      parts.push("- Use babji.configure_email_digest to change frequency or turn off");
+      parts.push("- When the user mentions email digests, scheduling, or 'check my emails', use this action");
+      parts.push("");
+    }
+
+    // Pending email drafts context (only when drafts file exists and not expired)
+    if (ctx.pendingDrafts && ctx.pendingDrafts.items.length > 0) {
+      parts.push("## Pending email drafts");
+      parts.push("You sent an email digest earlier. The user may respond with actions:");
+      parts.push('- "send 1" or "send all" -> call gmail.send_email with the draft');
+      parts.push('- "edit 2 to be shorter" -> modify the draft, show it, wait for approval');
+      parts.push('- "skip 3" or "skip all" -> discard those drafts');
+      parts.push('- "reply to Alice saying..." -> override the draft entirely');
+      parts.push("");
+      parts.push("Pending drafts:");
+      for (const item of ctx.pendingDrafts.items) {
+        parts.push(`${item.index}. To: ${item.to} | Subject: ${item.subject} | Draft: "${item.draftReply}"`);
+      }
+      parts.push("");
+    }
 
     parts.push("");
     parts.push("## Usage limits (STRICT)");
