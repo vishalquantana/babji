@@ -156,6 +156,40 @@ export function createServer({ config, db, handler, adapters }: ServerDeps) {
       });
     }
 
+
+    // Auto-seed email_digest job when Gmail is connected
+    if (provider === "gmail" && db) {
+      try {
+        const existing = await db.query.scheduledJobs.findFirst({
+          where: and(
+            eq(schema.scheduledJobs.tenantId, tenantId),
+            eq(schema.scheduledJobs.jobType, "email_digest"),
+          ),
+        });
+
+        if (!existing) {
+          const tenant = await db.query.tenants.findFirst({
+            where: eq(schema.tenants.id, tenantId),
+          });
+          const timezone = tenant?.timezone || "UTC";
+          const scheduledAt = nextUtcForLocalTime("08:00", timezone);
+
+          await db.insert(schema.scheduledJobs).values({
+            tenantId,
+            jobType: "email_digest",
+            scheduleType: "daily",
+            scheduledAt,
+            recurrenceRule: "08:00,17:00",
+            payload: { lastCheckedAt: null },
+            status: "active",
+          });
+
+          logger.info({ tenantId, scheduledAt: scheduledAt.toISOString() }, "Seeded email digest job on Gmail connect");
+        }
+      } catch (err) {
+        logger.error({ err, tenantId }, "Failed to seed email digest job");
+      }
+    }
     // Fire and forget — don't block the OAuth callback
     setImmediate(async () => {
       try {

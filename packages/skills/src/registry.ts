@@ -867,6 +867,22 @@ const checkWithTeacherSkill: SkillDefinition = {
         },
       },
     },
+    {
+      name: "configure_email_digest",
+      description: "Configure the automatic email digest frequency. Babji checks your email and sends digests of what needs attention. Default is morning + evening.",
+      parameters: {
+        frequency: {
+          type: "string",
+          required: true,
+          description: "How often to send digests: 'morning_only' (once at 8 AM), 'morning_evening' (8 AM + 5 PM, default), 'three_times' (8 AM + 12 PM + 5 PM), or 'off' (disable)",
+        },
+        times: {
+          type: "string",
+          required: false,
+          description: "Custom times as comma-separated HH:MM values, e.g. '07:00,12:00,18:00'. Overrides frequency presets.",
+        },
+      },
+    },
   ],
   creditsPerAction: 0,
 };

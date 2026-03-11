@@ -4,7 +4,7 @@ import type { BabjiMessage, OutboundMessage, SkillDefinition } from "@babji/type
 import { Brain, PromptBuilder, ToolExecutor, skillsToAiTools, MemoryExtractor } from "@babji/agent";
 import type { LlmClient } from "@babji/agent";
 import { MemoryManager, SessionStore } from "@babji/memory";
-import { CreditLedger } from "@babji/credits";
+
 import { TokenVault } from "@babji/crypto";
 import { GmailHandler, GoogleCalendarHandler, GoogleAdsHandler, GoogleAnalyticsHandler, PeopleHandler, TodosHandler, GeneralResearchHandler, ImageGenHandler, ImageStore } from "@babji/skills";
 import type { S3Config } from "@babji/skills";
@@ -90,7 +90,6 @@ function levenshtein(a: string, b: string): number {
 export interface MessageHandlerDeps {
   memory: MemoryManager;
   sessions: SessionStore;
-  credits: CreditLedger;
   llm: LlmClient;
   llmLite: LlmClient;
   availableSkills: SkillDefinition[];
@@ -420,16 +419,83 @@ export class MessageHandler {
               .set({ meetingBriefingPref: timing })
               .where(eq(schema.tenants.id, tenantId));
             const timingDesc = timing === "morning" ? "with your morning calendar summary" : "1 hour before each meeting";
-            return { success: true, message: `Meeting briefings enabled. I will research external attendees and send you a briefing ${timingDesc}. Each person researched uses 1 of your daily uses.` };
+            return { success: true, message: `Meeting briefings enabled. I will research external attendees and send you a briefing ${timingDesc}.` };
           }
           if (actionName === "disable_meeting_briefings") {
             await this.deps.db.update(schema.tenants)
-              .set({ meetingBriefingPref: null })
+              .set({ meetingBriefingPref: "disabled" })
               .where(eq(schema.tenants.id, tenantId));
-            return { success: true, message: "Meeting briefings disabled." };
+            return { success: true, message: "Meeting briefings disabled. You can re-enable them anytime." };
           }
           if (actionName === "research_meeting_attendees") {
             return this.handleOnDemandBriefing(tenantId, tenant, params.meeting_query as string);
+          }
+          if (actionName === "configure_email_digest") {
+            const frequency = params.frequency as string;
+            const validFreqs = ["morning_only", "morning_evening", "three_times", "off"];
+            if (!validFreqs.includes(frequency)) {
+              return { success: false, error: "frequency must be one of: " + validFreqs.join(", ") };
+            }
+
+            const freqToRule: Record<string, string> = {
+              morning_only: "08:00",
+              morning_evening: "08:00,17:00",
+              three_times: "08:00,12:00,17:00",
+            };
+
+            const customTimes = params.times as string | undefined;
+            const recurrenceRule = customTimes || freqToRule[frequency];
+
+            if (frequency === "off") {
+              const existingJob = await this.deps.db.query.scheduledJobs.findFirst({
+                where: and(
+                  eq(schema.scheduledJobs.tenantId, tenantId),
+                  eq(schema.scheduledJobs.jobType, "email_digest"),
+                ),
+              });
+              if (existingJob) {
+                await this.deps.db.update(schema.scheduledJobs)
+                  .set({ status: "paused" })
+                  .where(eq(schema.scheduledJobs.id, existingJob.id));
+              }
+              return { success: true, message: "Email digests turned off. You can re-enable them anytime." };
+            }
+
+            const existingJob = await this.deps.db.query.scheduledJobs.findFirst({
+              where: and(
+                eq(schema.scheduledJobs.tenantId, tenantId),
+                eq(schema.scheduledJobs.jobType, "email_digest"),
+              ),
+            });
+
+            if (existingJob) {
+              await this.deps.db.update(schema.scheduledJobs)
+                .set({ recurrenceRule, status: "active" })
+                .where(eq(schema.scheduledJobs.id, existingJob.id));
+            } else {
+              const { nextUtcForLocalTime } = await import("./job-runner.js");
+              const tz = tenant.timezone || "UTC";
+              const firstTime = recurrenceRule!.split(",")[0].trim();
+              await this.deps.db.insert(schema.scheduledJobs).values({
+                tenantId,
+                jobType: "email_digest",
+                scheduleType: "daily",
+                scheduledAt: nextUtcForLocalTime(firstTime, tz),
+                recurrenceRule: recurrenceRule!,
+                payload: { lastCheckedAt: null },
+                status: "active",
+              });
+            }
+
+            const freqDesc: Record<string, string> = {
+              morning_only: "once each morning at 8 AM",
+              morning_evening: "morning (8 AM) and evening (5 PM)",
+              three_times: "three times daily (8 AM, 12 PM, 5 PM)",
+            };
+            return {
+              success: true,
+              message: "Email digests set to " + (customTimes ? "custom times: " + customTimes : freqDesc[frequency]) + ". I will triage your inbox and send a summary with draft replies.",
+            };
           }
           throw new Error(`Unknown babji action: ${actionName}`);
         },
@@ -526,8 +592,6 @@ export class MessageHandler {
       }));
 
       // Build system prompt from soul + memory + skills
-      const dailyFreeCredits = await this.deps.credits.getDailyFreeAmount(tenantId);
-      const creditBalance = await this.deps.credits.getBalance(tenantId);
       const systemPrompt = PromptBuilder.build({
         soul,
         memory: memoryContent,
@@ -536,8 +600,6 @@ export class MessageHandler {
         userName: tenant.name,
         timezone: tenant.timezone ?? "UTC",
         completedSkillRequests,
-        dailyFreeCredits,
-        remainingCredits: creditBalance.dailyFree,
       });
 
       // Create per-request Brain with the tenant's ToolExecutor
@@ -556,21 +618,7 @@ export class MessageHandler {
         tools: aiTools,
       });
 
-      // Deduct credits when the brain invoked tool actions
-      let creditCost = 0;
-      if (result.toolCallsMade.length > 0) {
-        const hasCredits = await this.deps.credits.hasCredits(tenantId, 1);
-        if (hasCredits) {
-          await this.deps.credits.deduct(
-            tenantId,
-            1,
-            `Action: ${result.toolCallsMade.map((t) => t.actionName).join(", ")}`,
-          );
-          creditCost = 1;
-        } else {
-          logger.warn({ tenantId }, "Insufficient credits for tool call deduction");
-        }
-      }
+      const creditCost = 0;
 
       // Log usage (fire-and-forget)
       if (this.deps.usageTracker) {
