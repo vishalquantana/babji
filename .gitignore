@@ -7,3 +7,4 @@ dist/
 *.enc
 *.log
 .DS_Store
+.worktrees/
