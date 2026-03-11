@@ -71,8 +71,11 @@ export class GoogleCalendarHandler implements SkillHandler {
         end: event.end?.dateTime || event.end?.date,
         location: event.location,
         description: event.description,
+        organizer: event.organizer ? { email: event.organizer.email, displayName: event.organizer.displayName } : undefined,
+        creator: event.creator ? { email: event.creator.email, displayName: event.creator.displayName } : undefined,
         attendees: event.attendees?.map((a) => ({
           email: a.email,
+          displayName: a.displayName,
           responseStatus: a.responseStatus,
         })),
       }));
