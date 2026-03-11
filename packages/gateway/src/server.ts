@@ -8,6 +8,8 @@ import type { MessageHandler } from "./message-handler.js";
 import type { ChannelAdapter } from "./adapters/types.js";
 import { nextUtcForLocalTime } from "./job-runner.js";
 import { logger } from "./logger.js";
+import { ensureValidToken } from "./token-refresh.js";
+import { GoogleCalendarHandler } from "@babji/skills";
 
 const startedAt = Date.now();
 
@@ -115,6 +117,43 @@ export function createServer({ config, db, handler, adapters }: ServerDeps) {
       } catch (err) {
         logger.error({ err, tenantId }, "Failed to seed calendar summary job");
       }
+
+      // Infer email domain from calendar events (fire-and-forget)
+      setImmediate(async () => {
+        try {
+          const tenant = await db!.query.tenants.findFirst({
+            where: eq(schema.tenants.id, tenantId),
+          });
+          if (tenant?.emailDomain) return; // Already known
+
+          const tokenResult = await ensureValidToken(tenantId, "google_calendar", handler!["deps"].vault, db!);
+          if (!tokenResult || tokenResult.status === "expired") return;
+
+          const calHandler = new GoogleCalendarHandler(tokenResult.accessToken);
+          const result = await calHandler.execute("list_events", {
+            time_min: new Date().toISOString(),
+            max_results: 20,
+          }) as { events: Array<Record<string, unknown>>; count: number };
+
+          // Infer domain from organizer/creator fields
+          for (const event of result.events) {
+            for (const field of ["organizer", "creator"] as const) {
+              const entity = event[field] as { email?: string } | undefined;
+              if (!entity?.email) continue;
+              const domain = entity.email.split("@")[1]?.toLowerCase();
+              if (domain && domain !== "calendar.google.com" && domain !== "group.calendar.google.com") {
+                await db!.update(schema.tenants)
+                  .set({ emailDomain: domain })
+                  .where(eq(schema.tenants.id, tenantId));
+                logger.info({ tenantId, emailDomain: domain }, "Inferred email domain on calendar connect");
+                return;
+              }
+            }
+          }
+        } catch (err) {
+          logger.error({ err, tenantId }, "Failed to infer email domain on calendar connect");
+        }
+      });
     }
 
     // Fire and forget — don't block the OAuth callback
