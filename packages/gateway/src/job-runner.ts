@@ -13,6 +13,7 @@ import { ensureValidToken } from "./token-refresh.js";
 import { logger } from "./logger.js";
 import { AdminNotifier } from "./admin-notifier.js";
 import { MeetingBriefingService } from "./meeting-briefing.js";
+import { EmailDigestRunner } from "./email-digest.js";
 import type { UsageTracker } from "./usage-tracker.js";
 
 /** Converts a local time string like "07:30" + IANA timezone to the next UTC timestamp for that local time */
@@ -189,6 +190,9 @@ export class JobRunner {
         break;
       case "daily_usage_report":
         await this.runDailyUsageReport(job);
+        break;
+      case "email_digest":
+        await this.runEmailDigest(job);
         break;
       default:
         logger.warn({ jobType: job.jobType }, "Unknown job type, skipping");
@@ -1052,6 +1056,123 @@ export class JobRunner {
       recipient,
       text: `I wasn't able to complete the deep research on "${query}". Would you like me to try again, or do a quick search instead?`,
     });
+  }
+
+  private async runEmailDigest(job: typeof schema.scheduledJobs.$inferSelect): Promise<void> {
+    const tenantId = job.tenantId;
+
+    const tenant = await this.deps.db.query.tenants.findFirst({
+      where: eq(schema.tenants.id, tenantId),
+    });
+    if (!tenant) {
+      logger.warn({ tenantId }, "Tenant not found for email digest job");
+      return;
+    }
+
+    const timezone = tenant.timezone || "UTC";
+
+    // Get Gmail token
+    const tokenResult = await ensureValidToken(tenantId, "gmail", this.deps.vault, this.deps.db);
+    if (!tokenResult || tokenResult.status === "expired") {
+      logger.warn({ tenantId, status: tokenResult?.status }, "Gmail token expired for email digest, skipping");
+      await this.rescheduleEmailDigest(job, timezone);
+      return;
+    }
+
+    // Determine recipient channel
+    const recipient = tenant.telegramUserId || tenant.phone;
+    const channel = tenant.telegramUserId ? "telegram" : "whatsapp";
+    if (!recipient) {
+      logger.warn({ tenantId }, "No recipient channel for email digest");
+      await this.rescheduleEmailDigest(job, timezone);
+      return;
+    }
+
+    const adapter = this.deps.adapters.find((a) => a.name === channel);
+    if (!adapter) {
+      logger.warn({ tenantId, channel }, "No adapter found for email digest");
+      await this.rescheduleEmailDigest(job, timezone);
+      return;
+    }
+
+    try {
+      const memoryContent = await this.deps.memory.readMemory(tenantId);
+      const payload = (job.payload || {}) as Record<string, unknown>;
+      const lastCheckedAt = (payload.lastCheckedAt as string) || null;
+
+      const memoryBaseDir = process.env.MEMORY_BASE_DIR || "./data/tenants";
+
+      const runner = new EmailDigestRunner({
+        googleApiKey: this.deps.googleApiKey,
+        memoryBaseDir,
+      });
+
+      const result = await runner.run(
+        tokenResult.accessToken,
+        tenantId,
+        tenant.name,
+        memoryContent,
+        lastCheckedAt,
+      );
+
+      if (result) {
+        await adapter.sendMessage({
+          tenantId,
+          channel: channel as "telegram" | "whatsapp" | "app",
+          recipient,
+          text: result.message,
+        });
+
+        logger.info({ tenantId, draftsCount: result.draftsCount }, "Sent email digest");
+      } else {
+        logger.info({ tenantId }, "Email digest: no actionable emails, silent skip");
+      }
+
+      // Update payload with lastCheckedAt and stats
+      const prevStats = payload as Record<string, number>;
+      const updatedPayload = {
+        lastCheckedAt: new Date().toISOString(),
+        emailsTriaged: (prevStats.emailsTriaged || 0) + (result ? 1 : 0),
+      };
+
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ payload: updatedPayload })
+        .where(eq(schema.scheduledJobs.id, job.id));
+
+      // Log background job usage
+      if (this.deps.usageTracker) {
+        this.deps.usageTracker.logBackgroundJob({ tenantId, jobType: "email_digest" }).catch(() => {});
+      }
+    } catch (err) {
+      logger.error({ err, tenantId }, "Email digest failed");
+    }
+
+    await this.rescheduleEmailDigest(job, timezone);
+  }
+
+  private async rescheduleEmailDigest(job: typeof schema.scheduledJobs.$inferSelect, timezone: string): Promise<void> {
+    const rule = job.recurrenceRule || "08:00,17:00";
+    const times = rule.split(",").map((t) => t.trim());
+
+    // Find the next time slot that hasn't passed yet today
+    let nextRun: Date | null = null;
+
+    for (const time of times) {
+      const candidate = nextUtcForLocalTime(time, timezone);
+      if (!nextRun || candidate < nextRun) {
+        nextRun = candidate;
+      }
+    }
+
+    if (!nextRun) {
+      nextRun = nextUtcForLocalTime(times[0], timezone);
+    }
+
+    await this.deps.db.update(schema.scheduledJobs)
+      .set({ scheduledAt: nextRun, lastRunAt: new Date() })
+      .where(eq(schema.scheduledJobs.id, job.id));
+
+    logger.info({ jobId: job.id, nextRun: nextRun.toISOString() }, "Rescheduled email digest job");
   }
 
   private async rescheduleDaily(job: typeof schema.scheduledJobs.$inferSelect, timezone: string): Promise<void> {
