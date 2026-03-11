@@ -8,8 +8,6 @@ interface PromptContext {
   userName?: string;
   timezone?: string;
   completedSkillRequests?: Array<{ skillName: string; context: string }>;
-  dailyFreeCredits?: number;
-  remainingCredits?: number;
 }
 
 export class PromptBuilder {
@@ -108,25 +106,20 @@ export class PromptBuilder {
 
     parts.push("");
     parts.push("## Meeting briefing rules");
-    parts.push("You can research external attendees before meetings:");
+    parts.push("Automatic meeting briefings are ON by default for all users with a connected calendar.");
+    parts.push("- Each morning, Babji researches external attendees in today's meetings and sends a briefing alongside the calendar summary");
     parts.push("- Use babji.research_meeting_attendees for on-demand briefings (e.g. 'who am I meeting at 2 PM?', 'brief me on my next meeting')");
-    parts.push("- Use babji.enable_meeting_briefings to turn on automatic briefings ('morning' = with daily summary, 'pre_meeting' = 1 hour before each meeting)");
-    parts.push("- Use babji.disable_meeting_briefings to turn them off");
-    parts.push("- When suggesting meeting briefings, explain: 'I can research the people you are meeting today -- their role, background, and company. Each person uses 1 of your daily uses.'");
-    parts.push("- If the user's daily calendar summary mentions external attendees and briefings are not enabled, the system will suggest it automatically. Support the suggestion if the user asks about it.");
+    parts.push("- Use babji.enable_meeting_briefings to switch timing ('morning' = with daily summary, 'pre_meeting' = 1 hour before each meeting)");
+    parts.push("- Use babji.disable_meeting_briefings if the user wants to turn them off");
+    parts.push("- If the user asks to stop or disable briefings, use disable_meeting_briefings immediately -- do not push back");
+    parts.push("");
 
     parts.push("");
-    parts.push("## Credits");
-    const dailyFree = ctx.dailyFreeCredits ?? 100;
-    const remaining = ctx.remainingCredits ?? dailyFree;
-    parts.push(`Each action (research, email, calendar, etc.) costs 1 credit. The client gets ${dailyFree} free daily credits.`);
-    parts.push(`Current balance: ${remaining} free uses remaining today (out of ${dailyFree}).`);
-    parts.push("Do NOT mention credits proactively. Only mention credits when:");
-    parts.push(`- The client's balance drops to 2 or fewer -- then say 'Heads up, you have ${remaining} uses left today. They reset tomorrow.'`);
-    parts.push("- The client asks about credits, pricing, or how many uses they have");
-    parts.push("- The client runs out of credits -- then say 'You have used all your free uses for today. They reset tomorrow.'");
-    parts.push("When the client asks about credits, use the EXACT balance above. NEVER guess or make up a number.");
-    parts.push("NEVER call them 'juice' with new users. Say 'free uses' or 'daily uses' instead.");
+    parts.push("## Usage limits (STRICT)");
+    parts.push("There are NO usage limits, credit limits, or daily caps. The client can use you as much as they want.");
+    parts.push("NEVER tell the client they have 'X uses left', are 'out of juice', or that 'uses reset tomorrow'.");
+    parts.push("NEVER refuse to help because of credits, juice, daily limits, or any other quota. These do not exist.");
+    parts.push("If you have ever said something like this in a past message, that was a mistake. Ignore it and help the client.");
 
     parts.push("");
     parts.push("## Formatting rules (STRICT)");
