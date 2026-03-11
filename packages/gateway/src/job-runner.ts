@@ -320,19 +320,9 @@ export class JobRunner {
             const pref = tenant.meetingBriefingPref as string | null;
             const totalExternals = meetings.reduce((sum, m) => sum + m.attendees.length, 0);
 
-            if (pref === "morning") {
-              try {
-                const briefing = await briefingService.generateBriefing(meetings, tenantId, tenant.name, timezone);
-                await adapter.sendMessage({
-                  tenantId,
-                  channel: channel as "telegram" | "whatsapp" | "app",
-                  recipient: recipient!,
-                  text: briefing,
-                });
-                logger.info({ tenantId, meetings: meetings.length, attendees: totalExternals }, "Sent morning meeting briefing");
-              } catch (err) {
-                logger.error({ err, tenantId }, "Failed to generate/send morning briefing");
-              }
+            if (pref === "disabled") {
+              // User explicitly opted out — do nothing
+              logger.debug({ tenantId }, "Meeting briefings disabled by user, skipping");
             } else if (pref === "pre_meeting") {
               for (const meeting of meetings) {
                 if (!meeting.startTime || !meeting.startTime.includes("T")) continue;
@@ -356,15 +346,19 @@ export class JobRunner {
                 logger.info({ tenantId, meeting: meeting.summary, briefingAt: briefingTime.toISOString() }, "Scheduled pre-meeting briefing");
               }
             } else {
-              // Not enabled — suggest organically
-              const suggestionText = `\nYou have ${totalExternals} external attendee${totalExternals > 1 ? "s" : ""} across today's meetings. Want me to research them and send you a briefing before your meetings?`;
-              await adapter.sendMessage({
-                tenantId,
-                channel: channel as "telegram" | "whatsapp" | "app",
-                recipient: recipient!,
-                text: suggestionText,
-              });
-              logger.info({ tenantId, externals: totalExternals }, "Suggested meeting briefings to tenant");
+              // Default: "morning" or null — send morning briefing
+              try {
+                const briefing = await briefingService.generateBriefing(meetings, tenantId, tenant.name, timezone);
+                await adapter.sendMessage({
+                  tenantId,
+                  channel: channel as "telegram" | "whatsapp" | "app",
+                  recipient: recipient!,
+                  text: briefing,
+                });
+                logger.info({ tenantId, meetings: meetings.length, attendees: totalExternals }, "Sent morning meeting briefing");
+              } catch (err) {
+                logger.error({ err, tenantId }, "Failed to generate/send morning briefing");
+              }
             }
           }
         }
@@ -734,7 +728,7 @@ export class JobRunner {
     const tenantId = job.tenantId;
     const payload = job.payload as { tenantDomain?: string } | null;
 
-    if (!payload?.tenantDomain || !this.deps.peopleConfig) {
+    if (!this.deps.peopleConfig) {
       await this.deps.db.update(schema.scheduledJobs)
         .set({ status: "failed", lastRunAt: new Date() })
         .where(eq(schema.scheduledJobs.id, job.id));
@@ -747,6 +741,16 @@ export class JobRunner {
     if (!tenant) {
       await this.deps.db.update(schema.scheduledJobs)
         .set({ status: "completed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      return;
+    }
+
+    // Fall back to tenant's stored email domain if payload doesn't have it
+    const tenantDomain = payload?.tenantDomain || (tenant.emailDomain as string | null);
+    if (!tenantDomain) {
+      logger.warn({ tenantId }, "Profile scan skipped: no email domain available");
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "failed", lastRunAt: new Date() })
         .where(eq(schema.scheduledJobs.id, job.id));
       return;
     }
@@ -788,7 +792,7 @@ export class JobRunner {
       });
 
       const meetings = briefingService.extractExternalAttendees(
-        result.events, payload.tenantDomain,
+        result.events, tenantDomain,
       );
 
       // Research new attendees not yet in profile_directory
