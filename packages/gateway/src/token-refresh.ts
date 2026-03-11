@@ -8,11 +8,13 @@ interface StoredToken {
   access_token: string;
   refresh_token?: string;
   expires_at?: number; // epoch ms
+  cloud_id?: string;
 }
 
 interface RefreshResult {
   accessToken: string;
   status: "valid" | "refreshed" | "expired";
+  cloudId?: string;
 }
 
 const REFRESH_BUFFER_MS = 5 * 60 * 1000; // refresh 5 minutes before expiry
@@ -39,25 +41,30 @@ export async function ensureValidToken(
   // Check if token is still valid (with buffer)
   const now = Date.now();
   if (tokenData.expires_at && tokenData.expires_at > now + REFRESH_BUFFER_MS) {
-    return { accessToken: tokenData.access_token, status: "valid" };
+    return { accessToken: tokenData.access_token, status: "valid", cloudId: tokenData.cloud_id };
   }
 
   // Token expired or about to expire — try to refresh
   if (!tokenData.refresh_token) {
     logger.warn({ tenantId, provider }, "Token expired and no refresh_token available");
-    return { accessToken: tokenData.access_token, status: "expired" };
+    return { accessToken: tokenData.access_token, status: "expired", cloudId: tokenData.cloud_id };
   }
 
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  // Provider-specific OAuth credentials and token endpoint
+  const isAtlassian = provider === "jira";
+  const clientId = isAtlassian ? process.env.ATLASSIAN_CLIENT_ID : process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = isAtlassian ? process.env.ATLASSIAN_CLIENT_SECRET : process.env.GOOGLE_CLIENT_SECRET;
+  const tokenUrl = isAtlassian
+    ? "https://auth.atlassian.com/oauth/token"
+    : "https://oauth2.googleapis.com/token";
 
   if (!clientId || !clientSecret) {
-    logger.error("GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not configured for token refresh");
-    return { accessToken: tokenData.access_token, status: "expired" };
+    logger.error({ provider }, "Client ID or Client Secret not configured for token refresh");
+    return { accessToken: tokenData.access_token, status: "expired", cloudId: tokenData.cloud_id };
   }
 
   try {
-    const response = await fetch("https://oauth2.googleapis.com/token", {
+    const response = await fetch(tokenUrl, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
@@ -71,7 +78,7 @@ export async function ensureValidToken(
     if (!response.ok) {
       const errorBody = await response.text();
       logger.warn({ tenantId, provider, status: response.status, errorBody }, "Token refresh failed");
-      return { accessToken: tokenData.access_token, status: "expired" };
+      return { accessToken: tokenData.access_token, status: "expired", cloudId: tokenData.cloud_id };
     }
 
     const refreshed = await response.json() as {
@@ -82,11 +89,12 @@ export async function ensureValidToken(
 
     const newExpiresAt = Date.now() + refreshed.expires_in * 1000;
 
-    // Update the vault with the new access token (keep existing refresh_token)
+    // Update the vault with the new access token (keep existing refresh_token and cloud_id)
     await vault.store(tenantId, provider, {
       access_token: refreshed.access_token,
       refresh_token: tokenData.refresh_token,
       expires_at: newExpiresAt,
+      ...(tokenData.cloud_id ? { cloud_id: tokenData.cloud_id } : {}),
     });
 
     // Update the DB expiry timestamp
@@ -101,9 +109,9 @@ export async function ensureValidToken(
 
     logger.info({ tenantId, provider, expiresIn: refreshed.expires_in }, "Token refreshed successfully");
 
-    return { accessToken: refreshed.access_token, status: "refreshed" };
+    return { accessToken: refreshed.access_token, status: "refreshed", cloudId: tokenData.cloud_id };
   } catch (err) {
     logger.error({ err, tenantId, provider }, "Token refresh request failed");
-    return { accessToken: tokenData.access_token, status: "expired" };
+    return { accessToken: tokenData.access_token, status: "expired", cloudId: tokenData.cloud_id };
   }
 }
