@@ -580,6 +580,66 @@ export class MessageHandler {
               message: "Email digests set to " + (customTimes ? "custom times: " + customTimes : freqDesc[frequency]) + ". I will triage your inbox and send a summary with draft replies.",
             };
           }
+          if (actionName === "configure_jira_report") {
+            const mode = params.mode as string;
+            const validModes = ["on", "off"];
+            if (!validModes.includes(mode)) {
+              return { success: false, error: "mode must be one of: " + validModes.join(", ") };
+            }
+
+            // Update tenant preference
+            await this.deps.db.update(schema.tenants)
+              .set({ jiraReportPref: mode === "on" ? "morning" : "off" } as Record<string, unknown>)
+              .where(eq(schema.tenants.id, tenantId));
+
+            const existingJob = await this.deps.db.query.scheduledJobs.findFirst({
+              where: and(
+                eq(schema.scheduledJobs.tenantId, tenantId),
+                eq(schema.scheduledJobs.jobType, "daily_jira_report"),
+              ),
+            });
+
+            if (mode === "off") {
+              if (existingJob) {
+                await this.deps.db.update(schema.scheduledJobs)
+                  .set({ status: "paused" })
+                  .where(eq(schema.scheduledJobs.id, existingJob.id));
+              }
+              return { success: true, message: "Daily Jira report turned off. Say 'turn on my Jira report' to re-enable anytime." };
+            }
+
+            // Update or create the job
+            const customTime = params.time as string | undefined;
+            const tz = tenant.timezone || "UTC";
+
+            if (existingJob) {
+              const updates: Record<string, unknown> = { status: "active" };
+              if (customTime) {
+                updates.recurrenceRule = customTime;
+                updates.scheduledAt = nextUtcForLocalTime(customTime, tz);
+              }
+              await this.deps.db.update(schema.scheduledJobs)
+                .set(updates)
+                .where(eq(schema.scheduledJobs.id, existingJob.id));
+            } else {
+              const time = customTime || "09:00";
+              await this.deps.db.insert(schema.scheduledJobs).values({
+                tenantId,
+                jobType: "daily_jira_report",
+                scheduleType: "daily",
+                scheduledAt: nextUtcForLocalTime(time, tz),
+                recurrenceRule: time,
+                payload: {},
+                status: "active",
+              });
+            }
+
+            const effectiveTime = customTime || existingJob?.recurrenceRule || "09:00";
+            return {
+              success: true,
+              message: `Daily Jira report ${mode === "on" ? "enabled" : "updated"} -- you'll get it at ${effectiveTime} every morning. Say 'change my Jira report time' to adjust.`,
+            };
+          }
           throw new Error(`Unknown babji action: ${actionName}`);
         },
       });

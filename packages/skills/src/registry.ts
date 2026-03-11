@@ -961,6 +961,22 @@ const checkWithTeacherSkill: SkillDefinition = {
         },
       },
     },
+    {
+      name: "configure_jira_report",
+      description: "Configure the daily Jira report. Automatically sends a report of your assigned issues and recent project activity every morning. Only available when Jira is connected.",
+      parameters: {
+        mode: {
+          type: "string",
+          required: true,
+          description: "Report mode: 'on' (enable, default), or 'off' (disable)",
+        },
+        time: {
+          type: "string",
+          required: false,
+          description: "Optional time override in HH:MM 24-hour format (e.g. '09:00'). Default is 09:00.",
+        },
+      },
+    },
   ],
   creditsPerAction: 0,
 };
