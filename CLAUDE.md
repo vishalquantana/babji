@@ -44,10 +44,16 @@ User (Telegram/WhatsApp)
 - **Node/pnpm available at**: `/usr/bin/node`, `/usr/bin/pnpm`
 - **PM2 path**: `/root/.nvm/versions/node/v22.15.0/bin/pm2`
 
+### Landing Page (runs on same server as Gateway)
+- **Same server**: `65.20.76.199`
+- **Next.js port**: 3200 (nginx proxies `/` from 443)
+- **Log**: `/root/.pm2/logs/babji-landing-out.log` (PM2 managed)
+- **Serves**: Marketing landing page at `babji.quantana.top/`
+
 ### OAuth Portal (runs on same server as Gateway)
 - **Same server**: `65.20.76.199`
 - **Domain**: `babji.quantana.top` (nginx reverse proxy with Let's Encrypt SSL)
-- **Next.js port**: 3100 (nginx proxies from 443)
+- **Next.js port**: 3100 (nginx proxies `/admin`, `/connect`, `/link`, `/api`, `/report` from 443)
 - **Start script**: `/opt/babji/start-oauth-portal.sh` (sources .env, then runs Next.js)
 - **Log**: `/root/.pm2/logs/babji-oauth-out.log` (PM2 managed)
 - **Handles**: OAuth callbacks, admin dashboard (`/admin`), short links (`/link/<id>`)
@@ -55,7 +61,7 @@ User (Telegram/WhatsApp)
 ### Process Management (PM2)
 Both the gateway and OAuth portal are managed by PM2 for auto-restart on crash/reboot.
 - **IMPORTANT**: NEVER use `nohup`/manual `node` to start services — always use `pm2 restart`.
-- PM2 process names: `babji-gateway` (ID 1), `babji-oauth` (ID 2)
+- PM2 process names: `babji-gateway` (ID 1), `babji-oauth` (ID 2), `babji-landing` (ID 3)
 - PM2 binary: `export PATH="/root/.nvm/versions/node/v22.15.0/bin:$PATH"` then `pm2 ...`
 - View logs: `pm2 logs babji-gateway --lines 50 --nostream`
 - View status: `pm2 list`

@@ -6,6 +6,10 @@ All notable changes to Babji are documented here. Each entry notes whether the c
 
 ## 2026-03-11
 
+### Landing Page Deployment [DEPLOYED]
+- **What:** Deployed the `apps/landing-page` Next.js app as a separate PM2 process (`babji-landing`, port 3200) on the production server. Updated nginx to serve the landing page at `babji.quantana.top/` while routing `/admin`, `/connect`, `/link`, `/api`, `/report` to the OAuth portal (port 3100).
+- **Files:** Server-side: `/etc/nginx/sites-enabled/babji` (updated), PM2 process `babji-landing` (new, ID 3)
+
 ### Daily Jira Report (BAB-38) [DEPLOYED]
 - **What:** Any user who connects their Jira account automatically receives a daily report at 09:00 (configurable) covering their assigned open issues grouped by status and recent activity in their projects (last 24h, by others). Uses `DailyJiraReportService` with LLM composition via `gemini-3.1-flash-lite-preview`. Auto-seeded on Jira OAuth connect. Configurable via `babji.configure_jira_report` (on/off + custom time). New `jiraReportPref` column on tenants table. Also fixed `ensureValidToken` to return `cloudId` for Jira.
 - **Files:** `packages/gateway/src/daily-jira-report.ts` (new), `packages/gateway/src/job-runner.ts`, `packages/gateway/src/server.ts`, `packages/gateway/src/message-handler.ts`, `packages/gateway/src/token-refresh.ts`, `packages/agent/src/prompt-builder.ts`, `packages/skills/src/registry.ts`, `packages/db/src/schema.ts`
