@@ -855,11 +855,9 @@ export class MessageHandler {
 
           // Build people context for dedup
           const existingPeople = await this.deps.memory.listPeople(tenantId);
-          const peopleSummary = existingPeople.map(p => ({
-            name: p.name,
-            email: p.email,
-            factsSummary: p.facts.slice(-3).join("; ") || "no facts yet",
-          }));
+          const peopleSummary = existingPeople.map(p =>
+            `${p.name}${p.email ? ` <${p.email}>` : ""}: ${p.facts.slice(-3).join("; ") || "no facts yet"}`
+          );
 
           const extraction = await extractor.extractWithPeople({
             existingMemory: memoryContent,
