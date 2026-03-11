@@ -4,6 +4,14 @@ All notable changes to Babji are documented here. Each entry notes whether the c
 
 ---
 
+## 2026-03-11
+
+### Proactive email digest [DEPLOYED]
+- **What:** Babji now proactively triages unread Gmail 2x daily (morning + evening), drafts replies for actionable emails, and sends a numbered digest via Telegram/WhatsApp. Users can respond with "send 1", "edit 2 to say ...", or "skip all". Digest frequency is configurable via `babji.configure_email_digest` (morning_only, morning_evening, three_times, off, or custom times). Uses `gemini-3.1-flash-lite-preview` for LLM triage. Pending drafts stored as tenant JSON file with 12h expiry. Job auto-seeded on Gmail OAuth connect.
+- **Files:** `packages/gateway/src/email-digest.ts` (new), `packages/gateway/src/job-runner.ts`, `packages/gateway/src/server.ts`, `packages/gateway/src/message-handler.ts`, `packages/agent/src/prompt-builder.ts`, `packages/skills/src/registry.ts`
+
+---
+
 ## 2026-03-10
 
 ### Fix: Google Ads not showing live campaigns (BAB-15) [DEPLOYED]
