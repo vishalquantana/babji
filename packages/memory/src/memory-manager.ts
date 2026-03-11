@@ -1,5 +1,18 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
+
+const MAX_INTERACTIONS = 20;
+
+export interface PersonFile {
+  name: string;
+  email: string;
+  company: string;
+  role: string;
+  aliases: string[];
+  facts: string[];
+  dates: string[];
+  interactions: string[];
+}
 
 const DEFAULT_SOUL = `# Babji
 
@@ -58,6 +71,7 @@ export class MemoryManager {
     await mkdir(join(tenantDir, "sessions"), { recursive: true });
     await mkdir(join(tenantDir, "memory"), { recursive: true });
     await mkdir(join(tenantDir, "credentials"), { recursive: true });
+    await mkdir(join(tenantDir, "people"), { recursive: true });
 
     await writeFile(join(tenantDir, "SOUL.md"), DEFAULT_SOUL, "utf-8");
     await writeFile(join(tenantDir, "MEMORY.md"), DEFAULT_MEMORY, "utf-8");
@@ -136,6 +150,189 @@ export class MemoryManager {
     } catch {
       return "";
     }
+  }
+
+  // ---- People File CRUD ----
+
+  /**
+   * Normalize a person's name into a filename-safe slug.
+   * Strips accents, lowercases, replaces non-alphanumeric with hyphens, trims hyphens.
+   */
+  static slugifyName(name: string): string {
+    return name
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "") // strip diacritics
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")    // non-alphanum -> hyphen
+      .replace(/^-+|-+$/g, "");        // trim leading/trailing hyphens
+  }
+
+  /**
+   * Write a person file as markdown. Caps interactions at MAX_INTERACTIONS (keeps most recent).
+   */
+  async writePerson(tenantId: string, person: PersonFile): Promise<void> {
+    const slug = MemoryManager.slugifyName(person.name);
+    const peopleDir = join(this.tenantDir(tenantId), "people");
+    await mkdir(peopleDir, { recursive: true });
+
+    const capped = person.interactions.length > MAX_INTERACTIONS
+      ? person.interactions.slice(-MAX_INTERACTIONS)
+      : person.interactions;
+
+    const lines: string[] = [];
+    lines.push(`# ${person.name}`);
+    lines.push("");
+    lines.push(`- **Email**: ${person.email}`);
+    lines.push(`- **Company**: ${person.company}`);
+    lines.push(`- **Role**: ${person.role}`);
+    if (person.aliases.length > 0) {
+      lines.push(`- **Aliases**: ${person.aliases.join(", ")}`);
+    }
+    lines.push("");
+
+    if (person.facts.length > 0) {
+      lines.push("## Facts");
+      for (const fact of person.facts) {
+        lines.push(`- ${fact}`);
+      }
+      lines.push("");
+    }
+
+    if (person.dates.length > 0) {
+      lines.push("## Dates");
+      for (const date of person.dates) {
+        lines.push(`- ${date}`);
+      }
+      lines.push("");
+    }
+
+    if (capped.length > 0) {
+      lines.push("## Interactions");
+      for (const interaction of capped) {
+        lines.push(`- ${interaction}`);
+      }
+      lines.push("");
+    }
+
+    await writeFile(join(peopleDir, `${slug}.md`), lines.join("\n"), "utf-8");
+  }
+
+  /**
+   * Read a person file by slug. Returns null if not found.
+   */
+  async readPerson(tenantId: string, slug: string): Promise<PersonFile | null> {
+    const filePath = join(this.tenantDir(tenantId), "people", `${slug}.md`);
+    try {
+      const content = await readFile(filePath, "utf-8");
+      return MemoryManager.parsePersonFile(content);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * List all people files for a tenant.
+   */
+  async listPeople(tenantId: string): Promise<PersonFile[]> {
+    const peopleDir = join(this.tenantDir(tenantId), "people");
+    let files: string[];
+    try {
+      files = await readdir(peopleDir);
+    } catch {
+      return [];
+    }
+
+    const people: PersonFile[] = [];
+    for (const file of files) {
+      if (!file.endsWith(".md")) continue;
+      try {
+        const content = await readFile(join(peopleDir, file), "utf-8");
+        const person = MemoryManager.parsePersonFile(content);
+        if (person) people.push(person);
+      } catch {
+        // skip unreadable files
+      }
+    }
+    return people;
+  }
+
+  /**
+   * Find a person by email across all people files for a tenant.
+   */
+  async findPersonByEmail(tenantId: string, email: string): Promise<PersonFile | null> {
+    const people = await this.listPeople(tenantId);
+    const lowerEmail = email.toLowerCase();
+    return people.find(p => p.email.toLowerCase() === lowerEmail) ?? null;
+  }
+
+  /**
+   * Parse markdown content into a PersonFile.
+   */
+  static parsePersonFile(content: string): PersonFile | null {
+    const lines = content.split("\n");
+
+    // Parse name from first heading
+    const nameLine = lines.find(l => l.startsWith("# "));
+    if (!nameLine) return null;
+    const name = nameLine.replace(/^#\s+/, "").trim();
+
+    let email = "";
+    let company = "";
+    let role = "";
+    const aliases: string[] = [];
+    const facts: string[] = [];
+    const dates: string[] = [];
+    const interactions: string[] = [];
+
+    let currentSection = "meta"; // meta, facts, dates, interactions
+
+    for (const line of lines) {
+      // Detect section headers
+      if (line.startsWith("## Facts")) {
+        currentSection = "facts";
+        continue;
+      }
+      if (line.startsWith("## Dates")) {
+        currentSection = "dates";
+        continue;
+      }
+      if (line.startsWith("## Interactions")) {
+        currentSection = "interactions";
+        continue;
+      }
+      if (line.startsWith("## ")) {
+        currentSection = "unknown";
+        continue;
+      }
+
+      if (currentSection === "meta") {
+        const emailMatch = line.match(/^\s*-\s+\*\*Email\*\*:\s*(.+)/);
+        if (emailMatch) { email = emailMatch[1].trim(); continue; }
+
+        const companyMatch = line.match(/^\s*-\s+\*\*Company\*\*:\s*(.+)/);
+        if (companyMatch) { company = companyMatch[1].trim(); continue; }
+
+        const roleMatch = line.match(/^\s*-\s+\*\*Role\*\*:\s*(.+)/);
+        if (roleMatch) { role = roleMatch[1].trim(); continue; }
+
+        const aliasesMatch = line.match(/^\s*-\s+\*\*Aliases\*\*:\s*(.+)/);
+        if (aliasesMatch) {
+          aliases.push(...aliasesMatch[1].split(",").map(a => a.trim()).filter(Boolean));
+          continue;
+        }
+      }
+
+      // List items in sections
+      const itemMatch = line.match(/^\s*-\s+(.+)/);
+      if (itemMatch) {
+        const item = itemMatch[1].trim();
+        if (currentSection === "facts") facts.push(item);
+        else if (currentSection === "dates") dates.push(item);
+        else if (currentSection === "interactions") interactions.push(item);
+      }
+    }
+
+    return { name, email, company, role, aliases, facts, dates, interactions };
   }
 
   private tenantDir(tenantId: string): string {

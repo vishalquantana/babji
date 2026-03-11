@@ -123,4 +123,99 @@ describe("MemoryManager", () => {
       await expect(manager.readDailyLog(tenantId, "1999-01-01")).rejects.toThrow();
     });
   });
+
+  describe("people files", () => {
+    it("creates people/ dir on initialize", async () => {
+      await manager.initialize(tenantId);
+      const { stat } = await import("node:fs/promises");
+      const peopleStat = await stat(join(baseDir, tenantId, "people"));
+      expect(peopleStat.isDirectory()).toBe(true);
+    });
+
+    it("writes and reads a person file", async () => {
+      await manager.initialize(tenantId);
+      const person = {
+        name: "Srinivas Kumar",
+        email: "srinivas@acme.com",
+        company: "Acme Corp",
+        role: "VP Engineering",
+        aliases: [],
+        facts: ["[2026-03-10] Met at TechCrunch conference"],
+        dates: ["[BIRTHDAY: 04-15] Birthday is April 15"],
+        interactions: ["[2026-03-10] [meeting] 1:1 catch-up, 30 min"],
+      };
+      await manager.writePerson(tenantId, person);
+      const result = await manager.readPerson(tenantId, "srinivas-kumar");
+      expect(result).not.toBeNull();
+      expect(result!.name).toBe("Srinivas Kumar");
+      expect(result!.email).toBe("srinivas@acme.com");
+      expect(result!.facts).toHaveLength(1);
+      expect(result!.dates).toHaveLength(1);
+      expect(result!.interactions).toHaveLength(1);
+    });
+
+    it("returns null for non-existent person", async () => {
+      await manager.initialize(tenantId);
+      const result = await manager.readPerson(tenantId, "nobody");
+      expect(result).toBeNull();
+    });
+
+    it("lists all people for a tenant", async () => {
+      await manager.initialize(tenantId);
+      await manager.writePerson(tenantId, {
+        name: "Alice Johnson", email: "alice@co.com",
+        company: "", role: "", aliases: [], facts: [], dates: [], interactions: [],
+      });
+      await manager.writePerson(tenantId, {
+        name: "Bob Smith", email: "bob@co.com",
+        company: "", role: "", aliases: [], facts: [], dates: [], interactions: [],
+      });
+      const people = await manager.listPeople(tenantId);
+      expect(people).toHaveLength(2);
+      expect(people.map(p => p.name).sort()).toEqual(["Alice Johnson", "Bob Smith"]);
+    });
+
+    it("finds person by email", async () => {
+      await manager.initialize(tenantId);
+      await manager.writePerson(tenantId, {
+        name: "Alice Johnson", email: "alice@co.com",
+        company: "TestCo", role: "CEO", aliases: [], facts: [], dates: [], interactions: [],
+      });
+      const result = await manager.findPersonByEmail(tenantId, "alice@co.com");
+      expect(result).not.toBeNull();
+      expect(result!.name).toBe("Alice Johnson");
+    });
+
+    it("returns null when findPersonByEmail finds no match", async () => {
+      await manager.initialize(tenantId);
+      const result = await manager.findPersonByEmail(tenantId, "nobody@co.com");
+      expect(result).toBeNull();
+    });
+
+    it("normalizes name to filename slug", async () => {
+      await manager.initialize(tenantId);
+      await manager.writePerson(tenantId, {
+        name: "José María García", email: "jose@co.com",
+        company: "", role: "", aliases: [], facts: [], dates: [], interactions: [],
+      });
+      const result = await manager.readPerson(tenantId, "jose-maria-garcia");
+      expect(result).not.toBeNull();
+      expect(result!.name).toBe("José María García");
+    });
+
+    it("caps interactions at 20 entries", async () => {
+      await manager.initialize(tenantId);
+      const interactions = Array.from({ length: 25 }, (_, i) =>
+        `[2026-03-${String(i + 1).padStart(2, "0")}] [email] Message ${i + 1}`
+      );
+      await manager.writePerson(tenantId, {
+        name: "Busy Contact", email: "busy@co.com",
+        company: "", role: "", aliases: [], facts: [], dates: [], interactions,
+      });
+      const result = await manager.readPerson(tenantId, "busy-contact");
+      expect(result!.interactions).toHaveLength(20);
+      expect(result!.interactions[0]).toContain("Message 6");
+      expect(result!.interactions[19]).toContain("Message 25");
+    });
+  });
 });
