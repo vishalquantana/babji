@@ -4,6 +4,14 @@ All notable changes to Babji are documented here. Each entry notes whether the c
 
 ---
 
+## 2026-03-12
+
+### Daily news summary in briefing [DEPLOYED]
+- **What:** Added news headlines section to daily briefing. Fetches top headlines from Google News RSS + personalized topic news based on MEMORY.md keywords (industry, interests, sector). 3-5 headlines per briefing, curated by the composeBriefing LLM. Zero cost (no API key needed). Also deleted bogus "Daily News Summary" recurring reminder from production DB.
+- **Files:** `packages/gateway/src/news-fetcher.ts` (new), `packages/gateway/src/daily-briefing.ts`, `packages/gateway/src/__tests__/news-fetcher.test.ts` (new), `packages/gateway/package.json`
+
+---
+
 ## 2026-03-11
 
 ### Landing Page Deployment [DEPLOYED]
