@@ -257,6 +257,40 @@ export function createServer({ config, db, handler, adapters }: ServerDeps) {
         logger.error({ err, tenantId }, "Failed to seed daily Jira report job");
       }
     }
+    // Auto-complete connect_reminder if both Gmail and Calendar are now connected
+    if ((provider === "gmail" || provider === "google_calendar") && db) {
+      setImmediate(async () => {
+        try {
+          const allConnections = await db!.query.serviceConnections.findMany({
+            where: eq(schema.serviceConnections.tenantId, tenantId),
+          });
+          const hasGmail = allConnections.some((c) => c.provider === "gmail");
+          const hasCalendar = allConnections.some((c) => c.provider === "google_calendar");
+
+          if (hasGmail && hasCalendar) {
+            const reminderJob = await db!.query.scheduledJobs.findFirst({
+              where: and(
+                eq(schema.scheduledJobs.tenantId, tenantId),
+                eq(schema.scheduledJobs.jobType, "connect_reminder"),
+                eq(schema.scheduledJobs.status, "active"),
+              ),
+            });
+            if (reminderJob) {
+              await db!.update(schema.scheduledJobs)
+                .set({ status: "completed", lastRunAt: new Date() })
+                .where(eq(schema.scheduledJobs.id, reminderJob.id));
+              logger.info({ tenantId }, "Auto-completed connect_reminder: both Gmail and Calendar connected");
+            }
+
+            await db!.update(schema.tenants)
+              .set({ connectReminderStatus: "connected" } as Record<string, unknown>)
+              .where(eq(schema.tenants.id, tenantId));
+          }
+        } catch (err) {
+          logger.error({ err, tenantId }, "Failed to auto-complete connect_reminder on service connect");
+        }
+      });
+    }
     // Fire and forget — don't block the OAuth callback
     setImmediate(async () => {
       try {
