@@ -111,6 +111,7 @@ async function main() {
     oauthPortalUrl: process.env.OAUTH_PORTAL_URL || "https://babji.quantana.top",
     googleClientId: process.env.GOOGLE_CLIENT_ID || "",
     atlassianClientId: process.env.ATLASSIAN_CLIENT_ID || "",
+    linkedinClientId: process.env.LINKEDIN_CLIENT_ID || "",
     googleAdsDeveloperToken: config.googleAdsDeveloperToken,
     peopleConfig: config.people,
     googleApiKey: config.googleApiKey,
@@ -307,7 +308,7 @@ async function main() {
 
   // Create and start HTTP server
   const server = createServer({ config, db, handler, adapters });
-  await server.listen({ port: config.port, host: "0.0.0.0" });
+  await server.listen({ port: config.port, host: process.env.HOST || "127.0.0.1" });
   logger.info({ port: config.port, channels: adapters.map((a) => a.name) }, "Babji Gateway running");
 
   // Graceful shutdown

@@ -6,7 +6,7 @@ import type { LlmClient, PersonFact } from "@babji/agent";
 import { MemoryManager, SessionStore } from "@babji/memory";
 
 import { TokenVault } from "@babji/crypto";
-import { GmailHandler, GoogleCalendarHandler, GoogleAdsHandler, GoogleAnalyticsHandler, JiraHandler, PeopleHandler, TodosHandler, GeneralResearchHandler, ImageGenHandler, ImageStore } from "@babji/skills";
+import { GmailHandler, GoogleCalendarHandler, GoogleAdsHandler, GoogleAnalyticsHandler, JiraHandler, LinkedInHandler, PeopleHandler, TodosHandler, GeneralResearchHandler, ImageGenHandler, ImageStore } from "@babji/skills";
 import type { S3Config } from "@babji/skills";
 import type { SkillRequestManager } from "@babji/skills";
 import type { Database } from "@babji/db";
@@ -104,6 +104,7 @@ export interface MessageHandlerDeps {
   oauthPortalUrl: string;
   googleClientId: string;
   atlassianClientId: string;
+  linkedinClientId: string;
   googleAdsDeveloperToken: string;
   peopleConfig?: {
     enabled: boolean;
@@ -408,6 +409,10 @@ export class MessageHandler {
             });
           }
         }
+
+        if (conn.provider === "linkedin") {
+          toolExecutor.registerSkill("linkedin", new LinkedInHandler(accessToken));
+        }
       }
 
       // If any tokens are expired, handle gracefully
@@ -667,6 +672,94 @@ export class MessageHandler {
             return {
               success: true,
               message: `Daily Jira report ${mode === "on" ? "enabled" : "updated"} -- you'll get it at ${effectiveTime} every morning. Say 'change my Jira report time' to adjust.`,
+            };
+          }
+          if (actionName === "draft_linkedin_message") {
+            const recipientName = params.recipient_name as string;
+            const messageIntent = params.message_intent as string;
+            const tone = (params.tone as string) || "professional";
+            const linkedinUrl = params.recipient_linkedin_url as string | undefined;
+            const extraContext = params.context as string | undefined;
+
+            // Check memory for any info about the recipient
+            const slug = MemoryManager.slugifyName(recipientName);
+            const personMemory = await this.deps.memory.readPerson(tenantId, slug);
+            const memoryContext = personMemory
+              ? `Known info about ${recipientName}: ${JSON.stringify(personMemory)}`
+              : "";
+
+            const draftPrompt =
+              `Draft a LinkedIn message from ${tenant.name} to ${recipientName}.\n` +
+              `Intent: ${messageIntent}\n` +
+              `Tone: ${tone}\n` +
+              (extraContext ? `Context: ${extraContext}\n` : "") +
+              (memoryContext ? `${memoryContext}\n` : "") +
+              `\nRules:\n` +
+              `- Keep it concise (2-4 sentences for connection requests, up to 6 for InMail)\n` +
+              `- Be genuine and specific, avoid generic templates\n` +
+              `- Match the requested tone\n` +
+              `- Do NOT include subject lines unless it's an InMail\n` +
+              `- Output ONLY the message text, nothing else`;
+
+            const { Brain, ToolExecutor } = await import("@babji/agent");
+            const brain = new Brain(this.deps.llm, new ToolExecutor());
+            const result = await brain.process({
+              systemPrompt: "You are an expert LinkedIn message writer. Output only the message text.",
+              messages: [{ role: "user", content: draftPrompt }],
+              maxTurns: 1,
+              tools: {},
+            });
+
+            const response: Record<string, unknown> = {
+              success: true,
+              draft_message: result.content,
+              recipient: recipientName,
+              instructions: "Here's your drafted LinkedIn message. Copy it and send it directly on LinkedIn.",
+            };
+            if (linkedinUrl) {
+              response.linkedin_url = linkedinUrl;
+              response.instructions = `Here's your drafted LinkedIn message. Open ${linkedinUrl} and send it directly.`;
+            }
+            return response;
+          }
+          if (actionName === "configure_internal_domains") {
+            const domains = params.domains as string[];
+            const action = (params.action as string) || "add";
+
+            if (!Array.isArray(domains) || domains.length === 0) {
+              return { success: false, error: "Please provide at least one domain." };
+            }
+
+            // Validate domain format
+            const validDomains: string[] = [];
+            for (const d of domains) {
+              const cleaned = d.toLowerCase().trim();
+              if (!cleaned.includes(".") || cleaned.includes(" ") || cleaned.startsWith("http")) {
+                return { success: false, error: `Invalid domain format: "${d}". Use format like "example.com".` };
+              }
+              validDomains.push(cleaned);
+            }
+
+            const current = ((tenant as Record<string, unknown>).internalDomains as string[]) || [];
+            let updated: string[];
+
+            if (action === "set") {
+              updated = [...new Set(validDomains)];
+            } else if (action === "remove") {
+              updated = current.filter(d => !validDomains.includes(d));
+            } else {
+              // add (default)
+              updated = [...new Set([...current, ...validDomains])];
+            }
+
+            await this.deps.db.update(schema.tenants)
+              .set({ internalDomains: updated } as Record<string, unknown>)
+              .where(eq(schema.tenants.id, tenantId));
+
+            const domainList = updated.length > 0 ? updated.join(", ") : "(none)";
+            return {
+              success: true,
+              message: `Updated. Your internal domains are now: ${domainList}. Attendees from these domains will be treated as teammates in meeting briefings.`,
             };
           }
           if (actionName === "recall_person") {
@@ -1064,6 +1157,11 @@ export class MessageHandler {
       ],
       authUrl: "https://auth.atlassian.com/authorize",
     },
+    linkedin: {
+      displayName: "LinkedIn",
+      scopes: ["openid", "profile", "w_member_social"],
+      authUrl: "https://www.linkedin.com/oauth/v2/authorization",
+    },
   };
 
   /**
@@ -1086,7 +1184,12 @@ export class MessageHandler {
 
     // Build provider-specific OAuth params
     const isAtlassian = provider === "jira";
-    const clientId = isAtlassian ? this.deps.atlassianClientId : this.deps.googleClientId;
+    const isLinkedIn = provider === "linkedin";
+    const clientId = isAtlassian
+      ? this.deps.atlassianClientId
+      : isLinkedIn
+        ? this.deps.linkedinClientId
+        : this.deps.googleClientId;
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: redirectUri,
@@ -1097,7 +1200,7 @@ export class MessageHandler {
     });
     if (isAtlassian) {
       params.set("audience", "api.atlassian.com");
-    } else {
+    } else if (!isLinkedIn) {
       params.set("access_type", "offline");
     }
 
@@ -1235,7 +1338,8 @@ export class MessageHandler {
       },
     });
 
-    const meetings = briefingService.extractExternalAttendees(matchedEvents, tenantDomain);
+    const internalDomains = ((tenant as Record<string, unknown>).internalDomains as string[]) || [];
+    const meetings = briefingService.extractExternalAttendees(matchedEvents, tenantDomain, undefined, internalDomains);
     if (meetings.length === 0) {
       return { success: true, message: "No external attendees found in the matching meeting(s). All attendees appear to be from your organization." };
     }
