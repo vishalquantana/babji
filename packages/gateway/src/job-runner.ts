@@ -206,6 +206,9 @@ export class JobRunner {
       case "daily_jira_report":
         await this.runDailyJiraReport(job);
         break;
+      case "connect_reminder":
+        await this.runConnectReminder(job);
+        break;
       default:
         logger.warn({ jobType: job.jobType }, "Unknown job type, skipping");
         return;
@@ -1459,6 +1462,114 @@ export class JobRunner {
 
     // Reschedule for tomorrow
     await this.rescheduleDaily(job, timezone);
+  }
+
+  private async runConnectReminder(job: typeof schema.scheduledJobs.$inferSelect): Promise<void> {
+    const tenantId = job.tenantId;
+    const payload = (job.payload || {}) as { reminderCount?: number; maxReminders?: number };
+    const reminderCount = payload.reminderCount ?? 0;
+    const maxReminders = payload.maxReminders ?? 4;
+
+    const tenant = await this.deps.db.query.tenants.findFirst({
+      where: eq(schema.tenants.id, tenantId),
+    });
+    if (!tenant) {
+      logger.warn({ tenantId }, "Tenant not found for connect_reminder job");
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "completed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      return;
+    }
+
+    const timezone = tenant.timezone || "UTC";
+
+    // Check if tenant already has both Gmail and Calendar connected
+    const connections = await this.deps.db.query.serviceConnections.findMany({
+      where: eq(schema.serviceConnections.tenantId, tenantId),
+    });
+    const hasGmail = connections.some((c) => c.provider === "gmail");
+    const hasCalendar = connections.some((c) => c.provider === "google_calendar");
+
+    if (hasGmail && hasCalendar) {
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "completed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      await this.deps.db.update(schema.tenants)
+        .set({ connectReminderStatus: "connected" } as Record<string, unknown>)
+        .where(eq(schema.tenants.id, tenantId));
+      logger.info({ tenantId }, "Connect reminder: both services connected, marking completed");
+      return;
+    }
+
+    if (reminderCount >= maxReminders) {
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "completed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      await this.deps.db.update(schema.tenants)
+        .set({ connectReminderStatus: "exhausted" } as Record<string, unknown>)
+        .where(eq(schema.tenants.id, tenantId));
+      logger.info({ tenantId, reminderCount }, "Connect reminder: max reminders reached, marking exhausted");
+      return;
+    }
+
+    let message: string;
+    if (!hasGmail && !hasCalendar) {
+      message = `Hey ${tenant.name}! I can do a lot more for you once you connect your Gmail and Calendar -- daily inbox summaries, meeting briefings, smart reminders. Type **connect gmail** or **connect calendar** to get started.`;
+    } else if (!hasGmail) {
+      message = `Hey ${tenant.name}! Just a thought -- if you connect your Gmail, I can give you a daily inbox summary, help draft replies, and flag important emails. Just type **connect gmail** to get started.`;
+    } else {
+      message = `Hey ${tenant.name}! Quick idea -- connect your Google Calendar and I'll send you daily agendas, meeting briefings, and remind you before important meetings. Type **connect calendar** to set it up.`;
+    }
+
+    const recipient = tenant.telegramUserId || tenant.phone;
+    const channel = tenant.telegramUserId ? "telegram" : "whatsapp";
+    if (!recipient) {
+      logger.warn({ tenantId }, "No recipient channel for connect reminder");
+      await this.rescheduleConnectReminder(job, timezone, reminderCount + 1, maxReminders);
+      return;
+    }
+
+    const adapter = this.deps.adapters.find((a) => a.name === channel);
+    if (!adapter) {
+      logger.warn({ tenantId, channel }, "No adapter found for connect reminder");
+      await this.rescheduleConnectReminder(job, timezone, reminderCount + 1, maxReminders);
+      return;
+    }
+
+    await adapter.sendMessage({
+      tenantId,
+      channel: channel as "telegram" | "whatsapp" | "app",
+      recipient,
+      text: message,
+    });
+
+    logger.info({ tenantId, reminderCount: reminderCount + 1, hasGmail, hasCalendar }, "Sent connect reminder");
+
+    if (this.deps.usageTracker) {
+      this.deps.usageTracker.logBackgroundJob({ tenantId, jobType: "connect_reminder" }).catch(() => {});
+    }
+
+    await this.rescheduleConnectReminder(job, timezone, reminderCount + 1, maxReminders);
+  }
+
+  private async rescheduleConnectReminder(
+    job: typeof schema.scheduledJobs.$inferSelect,
+    timezone: string,
+    newCount: number,
+    maxReminders: number,
+  ): Promise<void> {
+    const localTime = job.recurrenceRule || "18:00";
+    const nextRun = new Date(nextUtcForLocalTime(localTime, timezone).getTime() + 6 * 86_400_000);
+
+    await this.deps.db.update(schema.scheduledJobs)
+      .set({
+        scheduledAt: nextRun,
+        lastRunAt: new Date(),
+        payload: { reminderCount: newCount, maxReminders },
+      })
+      .where(eq(schema.scheduledJobs.id, job.id));
+
+    logger.info({ jobId: job.id, nextRun: nextRun.toISOString(), reminderCount: newCount }, "Rescheduled connect reminder");
   }
 
   private async rescheduleWeekly(job: typeof schema.scheduledJobs.$inferSelect, timezone: string): Promise<void> {
