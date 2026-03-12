@@ -52,11 +52,25 @@ export async function ensureValidToken(
 
   // Provider-specific OAuth credentials and token endpoint
   const isAtlassian = provider === "jira";
-  const clientId = isAtlassian ? process.env.ATLASSIAN_CLIENT_ID : process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = isAtlassian ? process.env.ATLASSIAN_CLIENT_SECRET : process.env.GOOGLE_CLIENT_SECRET;
-  const tokenUrl = isAtlassian
-    ? "https://auth.atlassian.com/oauth/token"
-    : "https://oauth2.googleapis.com/token";
+  const isLinkedIn = provider === "linkedin";
+
+  let clientId: string | undefined;
+  let clientSecret: string | undefined;
+  let tokenUrl: string;
+
+  if (isAtlassian) {
+    clientId = process.env.ATLASSIAN_CLIENT_ID;
+    clientSecret = process.env.ATLASSIAN_CLIENT_SECRET;
+    tokenUrl = "https://auth.atlassian.com/oauth/token";
+  } else if (isLinkedIn) {
+    clientId = process.env.LINKEDIN_CLIENT_ID;
+    clientSecret = process.env.LINKEDIN_CLIENT_SECRET;
+    tokenUrl = "https://www.linkedin.com/oauth/v2/accessToken";
+  } else {
+    clientId = process.env.GOOGLE_CLIENT_ID;
+    clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    tokenUrl = "https://oauth2.googleapis.com/token";
+  }
 
   if (!clientId || !clientSecret) {
     logger.error({ provider }, "Client ID or Client Secret not configured for token refresh");
