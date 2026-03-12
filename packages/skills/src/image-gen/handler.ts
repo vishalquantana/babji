@@ -71,7 +71,7 @@ Rules:
 - Output valid JSON: { "enhanced_prompt": "...", "suggested_aspect_ratio": "...", "reasoning": "..." }`;
 
     const response = await fetch(
-      `${GEMINI_API_BASE}/models/gemini-2.0-flash-lite:generateContent?key=${this.googleApiKey}`,
+      `${GEMINI_API_BASE}/models/gemini-2.0-flash:generateContent?key=${this.googleApiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -174,10 +174,10 @@ Rules:
       );
     }
 
-    // Find the image part
+    // Find the image part (Gemini API returns camelCase: inlineData/mimeType)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const imagePart = parts.find((p: any) =>
-      p.inline_data?.mime_type?.startsWith("image/"),
+      (p.inlineData?.mimeType ?? p.inline_data?.mime_type)?.startsWith("image/"),
     );
     if (!imagePart) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -187,8 +187,9 @@ Rules:
       );
     }
 
-    const base64Data = imagePart.inline_data.data as string;
-    const mimeType = (imagePart.inline_data.mime_type as string) || "image/png";
+    const inlineData = imagePart.inlineData ?? imagePart.inline_data;
+    const base64Data = inlineData.data as string;
+    const mimeType = (inlineData.mimeType ?? inlineData.mime_type) as string || "image/png";
     const buffer = Buffer.from(base64Data, "base64");
 
     // Upload to S3 if configured
