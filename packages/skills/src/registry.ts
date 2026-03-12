@@ -778,7 +778,7 @@ const checkWithTeacherSkill: SkillDefinition = {
         service_name: {
           type: "string",
           required: true,
-          description: "The service to connect. One of: gmail, google_calendar, google_ads, google_analytics, jira",
+          description: "The service to connect. One of: gmail, google_calendar, google_ads, google_analytics, jira, linkedin",
         },
       },
     },
@@ -974,6 +974,54 @@ const checkWithTeacherSkill: SkillDefinition = {
           type: "string",
           required: false,
           description: "Optional time override in HH:MM 24-hour format (e.g. '09:00'). Default is 09:00.",
+        },
+      },
+    },
+    {
+      name: "draft_linkedin_message",
+      description: "Draft a professional LinkedIn message for the user to send manually. Use this when the user wants to message someone on LinkedIn. Returns the drafted message text for the user to copy-paste into LinkedIn. If a LinkedIn profile URL is available (from memory or provided), include it so the user can navigate directly.",
+      parameters: {
+        recipient_name: {
+          type: "string",
+          required: true,
+          description: "Name of the person to message on LinkedIn",
+        },
+        message_intent: {
+          type: "string",
+          required: true,
+          description: "What the user wants to communicate (e.g. 'follow up on our meeting', 'introduce myself', 'ask about job opening')",
+        },
+        tone: {
+          type: "string",
+          required: false,
+          description: "Message tone: 'professional' (default), 'casual', or 'formal'",
+        },
+        recipient_linkedin_url: {
+          type: "string",
+          required: false,
+          description: "LinkedIn profile URL of the recipient, if known",
+        },
+        context: {
+          type: "string",
+          required: false,
+          description: "Additional context about the relationship or conversation history",
+        },
+      },
+    },
+    {
+      name: "configure_internal_domains",
+      description: "Add, remove, or set the list of internal email domains for the user's organization. Attendees from these domains are treated as teammates in meeting briefings. The user's primary email domain is always included automatically.",
+      parameters: {
+        domains: {
+          type: "array",
+          required: true,
+          items: { type: "string" },
+          description: "List of email domains (e.g. ['quantana.in', 'simplybiz.in'])",
+        },
+        action: {
+          type: "string",
+          required: false,
+          description: "Action: 'add' (append, default), 'remove' (remove specified), or 'set' (replace all)",
         },
       },
     },
@@ -1293,7 +1341,90 @@ const jiraSkill: SkillDefinition = {
   creditsPerAction: 1,
 };
 
-const allSkills: SkillDefinition[] = [gmailSkill, calendarSkill, googleAdsSkill, googleAnalyticsSkill, jiraSkill, checkWithTeacherSkill, peopleSkill, generalResearchSkill, imageGenSkill];
+
+const linkedinSkill: SkillDefinition = {
+  name: "linkedin",
+  displayName: "LinkedIn",
+  description: "Create posts, share articles, and view engagement on LinkedIn.",
+  requiresAuth: {
+    provider: "linkedin",
+    scopes: ["openid", "profile", "w_member_social"],
+  },
+  actions: [
+    {
+      name: "create_post",
+      description: "Create a LinkedIn post. Supports text, image, or article/link sharing.",
+      parameters: {
+        text: {
+          type: "string",
+          required: true,
+          description: "The post text/commentary",
+        },
+        image_url: {
+          type: "string",
+          required: false,
+          description: "URL of an image to attach. The image will be uploaded to LinkedIn.",
+        },
+        article_url: {
+          type: "string",
+          required: false,
+          description: "URL of an article/link to share",
+        },
+        article_title: {
+          type: "string",
+          required: false,
+          description: "Title for the shared article (optional, used with article_url)",
+        },
+        visibility: {
+          type: "string",
+          required: false,
+          description: "Post visibility: 'PUBLIC' (default) or 'CONNECTIONS'",
+        },
+      },
+    },
+    {
+      name: "list_posts",
+      description: "List the user's recent LinkedIn posts.",
+      parameters: {
+        count: {
+          type: "number",
+          required: false,
+          description: "Number of posts to return (1-50, default 10)",
+        },
+      },
+    },
+    {
+      name: "get_post",
+      description: "Get a single LinkedIn post with engagement metrics.",
+      parameters: {
+        post_id: {
+          type: "string",
+          required: true,
+          description: "The LinkedIn post URN (from list_posts)",
+        },
+      },
+    },
+    {
+      name: "get_profile",
+      description: "Get the authenticated user's LinkedIn profile.",
+      parameters: {},
+    },
+    {
+      name: "get_post_analytics",
+      description: "Get engagement metrics (likes, comments, shares) for recent posts.",
+      parameters: {
+        count: {
+          type: "number",
+          required: false,
+          description: "Number of recent posts to get analytics for (1-10, default 5)",
+        },
+      },
+    },
+  ],
+  creditsPerAction: 1,
+};
+
+const allSkills: SkillDefinition[] = [gmailSkill, calendarSkill, googleAdsSkill, googleAnalyticsSkill, jiraSkill, checkWithTeacherSkill, peopleSkill, generalResearchSkill, imageGenSkill, linkedinSkill];
 
 /**
  * Load all registered skill definitions.
