@@ -74,6 +74,19 @@ async function main() {
       );
     });
     logger.info("Admin bot notifications enabled");
+
+    // Start listening for admin replies (profile corrections)
+    if (config.people.enabled) {
+      adminNotifier.startListening({
+        db,
+        peopleConfig: {
+          scrapinApiKey: config.people.scrapinApiKey,
+          dataforseoLogin: config.people.dataforseoLogin,
+          dataforseoPassword: config.people.dataforseoPassword,
+        },
+        llmLite,
+      });
+    }
   }
 
   // Usage tracking (writes to audit_log table)
@@ -269,6 +282,9 @@ async function main() {
   const shutdown = async () => {
     logger.info("Shutting down...");
     jobRunner.stop();
+    if (adminNotifier) {
+      adminNotifier.stop();
+    }
     for (const adapter of adapters) {
       await adapter.stop();
     }

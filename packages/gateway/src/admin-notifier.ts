@@ -32,7 +32,7 @@ interface AdminReplyDeps {
     dataforseoLogin: string;
     dataforseoPassword: string;
   };
-  llmLite: { generateText: (opts: { model: string; system: string; prompt: string }) => Promise<{ text: string }> };
+  llmLite: { chat: (messages: Array<{ role: "system" | "user" | "assistant"; content: string }>) => Promise<{ content: string }> };
 }
 
 export class AdminNotifier {
@@ -198,13 +198,12 @@ export class AdminNotifier {
     const prompt = `Recent meeting attendees:\n${attendeeList}\n\nLinkedIn URL: ${linkedinUrl}\n\nWhich attendee does this URL most likely belong to? Consider the name in the URL slug vs attendee names.\nReply with JSON: { "email": "<matched-email>", "confidence": "high" }\nIf genuinely ambiguous between 2+ people, reply: { "email": null, "confidence": "ambiguous", "candidates": ["email1", "email2"] }`;
 
     try {
-      const result = await this.replyDeps.llmLite.generateText({
-        model: process.env.GOOGLE_LITE_MODEL || "gemini-2.0-flash-lite",
-        system,
-        prompt,
-      });
+      const result = await this.replyDeps.llmLite.chat([
+        { role: "system", content: system },
+        { role: "user", content: prompt },
+      ]);
 
-      const cleaned = result.text.replace(/```json?\s*/g, "").replace(/```/g, "").trim();
+      const cleaned = result.content.replace(/```json?\s*/g, "").replace(/```/g, "").trim();
       const parsed = JSON.parse(cleaned) as {
         email: string | null;
         confidence: string;
