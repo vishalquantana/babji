@@ -37,7 +37,8 @@ User (Telegram/WhatsApp)
 - **SSH**: `ssh root@65.20.76.199`
 - **Code location**: `/opt/babji/`
 - **Env file**: `/opt/babji/.env` (has all secrets - DATABASE_URL, GOOGLE_API_KEY, TELEGRAM_BOT_TOKEN, etc.)
-- **PostgreSQL**: Docker container on port 5432 (user: `babji`, pass: `babji_prod_2026`, db: `babji`)
+- **PostgreSQL**: Docker container `babji-postgres-1` on port 5432 (user: `babji`, pass: `babji_prod_2026`, db: `babji`)
+- **psql access**: `docker exec -i babji-postgres-1 psql -U babji -d babji -c "SQL HERE"` (psql not on host PATH)
 - **Redis**: Docker container on port 6379
 - **Tenant data**: `/opt/babji/data/tenants/<tenant-id>/` (SOUL.md, MEMORY.md, etc.)
 - **Gateway log**: `/root/.pm2/logs/babji-gateway-out.log` (PM2 managed)
@@ -83,22 +84,27 @@ pnpm --filter @babji/agent build    # if agent package changed
 pnpm --filter @babji/gateway build  # gateway always
 
 # 2. Run tests
-pnpm --filter @babji/gateway test   # should pass 34/34
+pnpm --filter @babji/gateway test   # should pass 48/48
 
 # 3. Sync to server (preserves .env and data)
 rsync -az --delete \
-  --exclude node_modules --exclude .git --exclude .env --exclude data \
+  --exclude node_modules --exclude .git --exclude .env --exclude data --exclude .worktrees \
   /Users/vishalkumar/Downloads/babji/ root@65.20.76.199:/opt/babji/
 
 # 4. Install deps on server
 ssh root@65.20.76.199 'cd /opt/babji && pnpm install --no-frozen-lockfile'
 
-# 5. Restart gateway via PM2
+# 5. Rebuild packages on server (IMPORTANT: needed when schema or shared packages change)
+ssh root@65.20.76.199 'cd /opt/babji && pnpm --filter @babji/db build'  # if schema changed
+
+# 6. Restart gateway via PM2
 ssh root@65.20.76.199 'export PATH="/root/.nvm/versions/node/v22.15.0/bin:$PATH" && pm2 restart babji-gateway'
 
-# 6. Verify
+# 7. Verify
 ssh root@65.20.76.199 'sleep 2 && curl -s http://localhost:3000/health'
 ```
+
+**IMPORTANT**: When `packages/db/src/schema.ts` changes, you MUST rebuild it on the server (`pnpm --filter @babji/db build`) before restarting the gateway. The gateway imports the compiled `dist/` from the db package — if it's stale, the new columns/tables won't be recognized at runtime.
 
 ### Deploy OAuth Portal
 The OAuth portal runs on the **same server as the gateway** (65.20.76.199), on port 3100 behind nginx.
@@ -152,8 +158,9 @@ pnpm --filter @babji/gateway test   # vitest
 No open tickets currently. Last completed: BAB-3 (general_research skill, Done).
 
 ## Database Tables (Drizzle ORM)
-- `tenants` - User accounts (name, phone, telegramUserId, plan, credits)
+- `tenants` - User accounts (name, phone, telegramUserId, plan, credits, connectReminderStatus)
 - `service_connections` - OAuth connections per tenant (provider, scopes, expiresAt)
+- `scheduled_jobs` - Recurring/one-time jobs (daily_briefing, email_digest, connect_reminder, etc.)
 - `short_links` - URL shortener for OAuth links
 - `skill_requests` - "Check with my teacher" requests
 - `audit_log` - Action/credit usage tracking
@@ -185,12 +192,24 @@ No open tickets currently. Last completed: BAB-3 (general_research skill, Done).
 ### Post-Connect Flow
 - Two-step: immediate "Gmail connected!" message, then Brain-powered inbox summary
 - Triggered via `/api/connect-complete` endpoint called by OAuth callback
+- Auto-completes `connect_reminder` job when both Gmail and Calendar are connected
+
+### Connect Reminder (Weekly Nudge)
+- Sends weekly reminders at 6 PM local time to users who haven't connected Gmail and/or Calendar
+- Value-focused messages (different text for Gmail-only, Calendar-only, or both missing)
+- Caps at 4 reminders (1 month), then marks `connectReminderStatus = "exhausted"`
+- User says "stop reminding" → snoozes for 1 week (count still increments toward cap)
+- Auto-completes when both services are connected via OAuth
+- Seeded on startup for existing tenants, on onboarding for new tenants
+- Job type: `connect_reminder` in `scheduled_jobs` table
+- Tenant field: `connectReminderStatus` (values: `active`, `snoozed`, `exhausted`, `connected`)
+- Key files: `job-runner.ts` (handler), `index.ts` (startup seeding), `message-handler.ts` (onboarding seeding + stop detection), `server.ts` (auto-complete on OAuth)
 
 ## Testing
 ```bash
-pnpm --filter @babji/gateway test  # 29 tests, ~1s
+pnpm --filter @babji/gateway test  # 48 tests, ~1s
 ```
-Tests cover: message normalizer, rate limiter, tenant resolver, onboarding, e2e pipeline.
+Tests cover: message normalizer, rate limiter, tenant resolver, onboarding, e2e pipeline, news fetcher.
 
 ## Admin Dashboard
 - URL: `babji.quantana.top/admin`
