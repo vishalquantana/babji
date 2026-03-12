@@ -34,7 +34,11 @@ export function timezoneToCountry(timezone: string): { country: string; lang: st
  */
 export function parseRssItems(xml: string): NewsItem[] {
   try {
-    const parser = new XMLParser({ ignoreAttributes: false });
+    const parser = new XMLParser({
+      ignoreAttributes: false,
+      processEntities: false,
+      trimValues: true,
+    });
     const parsed = parser.parse(xml);
 
     const channel = parsed?.rss?.channel;
