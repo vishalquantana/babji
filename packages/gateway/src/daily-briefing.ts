@@ -10,6 +10,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { EmailDigestRunner } from "./email-digest.js";
 import { getStaleFollowUps } from "./stale-followups.js";
 import { ensureValidToken } from "./token-refresh.js";
+import { fetchNewsHeadlines, fetchTopicNews, extractTopicsFromMemory, timezoneToCountry } from "./news-fetcher.js";
 import { logger } from "./logger.js";
 
 const BRIEFING_MODEL = "gemini-3.1-flash-lite-preview";
@@ -44,13 +45,14 @@ export class DailyBriefingService {
     const hasGmail = connections.some((c) => c.provider === "gmail");
 
     // Gather data in parallel - each source is independently try/caught
-    const [calendarSection, emailSection, todosSection, memoryDatesSection, staleSection] =
+    const [calendarSection, emailSection, todosSection, memoryDatesSection, staleSection, newsSection] =
       await Promise.all([
         hasCalendar ? this.getCalendarSection(tenantId, timezone) : null,
         hasGmail ? this.getEmailSection(tenantId, tenant.name, timezone) : null,
         this.getTodosSection(tenantId, timezone),
         this.getMemoryDatesSection(tenantId),
         hasGmail ? this.getStaleFollowUpsSection(tenantId) : null,
+        this.getNewsSection(tenantId, timezone),
       ]);
 
     if (calendarSection) sections.push(calendarSection);
@@ -58,6 +60,7 @@ export class DailyBriefingService {
     if (todosSection) sections.push(todosSection);
     if (memoryDatesSection) sections.push(memoryDatesSection);
     if (staleSection) sections.push(staleSection);
+    if (newsSection) sections.push(newsSection);
 
     // Nothing to report
     if (sections.length === 0) return null;
@@ -240,6 +243,56 @@ export class DailyBriefingService {
     }
   }
 
+  private async getNewsSection(
+    tenantId: string,
+    timezone: string,
+  ): Promise<BriefingSection | null> {
+    try {
+      const { country, lang } = timezoneToCountry(timezone);
+
+      // Fetch top headlines
+      const headlines = await fetchNewsHeadlines(country, lang, 8);
+
+      // Try to get personalized topic news from MEMORY.md
+      const memoryContent = await this.deps.memory.readMemory(tenantId);
+      const topics = extractTopicsFromMemory(memoryContent);
+
+      let topicItems: Array<{ title: string; source: string; publishedAt: string }> = [];
+      if (topics.length > 0) {
+        const topicResults = await Promise.all(
+          topics.map((topic) => fetchTopicNews(topic, country, lang, 3)),
+        );
+        topicItems = topicResults.flat();
+      }
+
+      // Combine and deduplicate
+      const seen = new Set<string>();
+      const allItems: Array<{ title: string; source: string }> = [];
+
+      // Topic items first (more relevant), then general headlines
+      for (const item of [...topicItems, ...headlines]) {
+        const key = item.title.toLowerCase().slice(0, 40);
+        if (!seen.has(key)) {
+          seen.add(key);
+          allItems.push({ title: item.title, source: item.source });
+        }
+        if (allItems.length >= 10) break;
+      }
+
+      if (allItems.length === 0) return null;
+
+      const lines = allItems.map((item) => {
+        const src = item.source ? ` (${item.source})` : "";
+        return `- ${item.title}${src}`;
+      });
+
+      return { label: "News", content: lines.join("\n") };
+    } catch (err) {
+      logger.warn({ err, tenantId }, "Daily briefing: news section failed");
+      return null;
+    }
+  }
+
   private async composeBriefing(
     userName: string,
     timezone: string,
@@ -266,6 +319,7 @@ export class DailyBriefingService {
 - Use plain text only -- no markdown, no emojis, no bold/italic
 - Use line breaks and dashes for structure
 - If there are email drafts, mention them and how to act on them
+- For news headlines, pick the 3-5 most relevant/important and present briefly
 - End with a brief "Anything you want me to help with?" or similar
 - Keep the total message under 2000 characters`,
           },
