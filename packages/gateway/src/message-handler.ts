@@ -935,7 +935,17 @@ export class MessageHandler {
               payload: {},
               status: "active",
             });
-            logger.info({ tenantId }, "Seeded daily_briefing + memory_scan for new tenant");
+            // Seed connect_reminder (will fire in 7 days at 6 PM local)
+            await this.deps.db.insert(schema.scheduledJobs).values({
+              tenantId,
+              jobType: "connect_reminder",
+              scheduleType: "daily",
+              scheduledAt: new Date(nextUtcForLocalTime("18:00", tz).getTime() + 6 * 86_400_000),
+              recurrenceRule: "18:00",
+              payload: { reminderCount: 0, maxReminders: 4 },
+              status: "active",
+            });
+            logger.info({ tenantId }, "Seeded daily_briefing + memory_scan + connect_reminder for new tenant");
           } catch (err) {
             logger.error({ err, tenantId }, "Failed to seed jobs for new tenant");
           }
