@@ -281,12 +281,43 @@ export class DailyBriefingService {
 
       if (allItems.length === 0) return null;
 
-      const lines = allItems.map((item) => {
-        const src = item.source ? ` (${item.source})` : "";
-        return `- ${item.title}${src}`;
-      });
+      // Use LLM to pick the 5 most important headlines and add a 1-line takeaway for each
+      const numbered = allItems.map((item, i) => `${i + 1}. ${item.title} (${item.source})`).join("\n");
+      const googleAi = createGoogleGenerativeAI({ apiKey: this.deps.googleApiKey });
 
-      return { label: "News", content: lines.join("\n") };
+      try {
+        const result = await generateText({
+          model: googleAi(BRIEFING_MODEL),
+          messages: [
+            {
+              role: "system",
+              content: `You are a news analyst. Pick the 5 most important/interesting headlines from the list below and for each write:
+- The headline (keep it concise, reword if needed)
+- A 1-line takeaway explaining why it matters or what the key implication is
+
+Format each item exactly like this:
+HEADLINE: <short headline>
+TAKEAWAY: <1 sentence why it matters>
+
+Output exactly 5 items, separated by blank lines. No numbering, no bullets, no other text.`,
+            },
+            {
+              role: "user",
+              content: numbered,
+            },
+          ],
+        });
+
+        return { label: "News", content: result.text.trim() };
+      } catch (llmErr) {
+        // Fallback: just list headlines without takeaways
+        logger.warn({ err: llmErr, tenantId }, "Daily briefing: news LLM summary failed, using raw headlines");
+        const lines = allItems.slice(0, 5).map((item) => {
+          const src = item.source ? ` (${item.source})` : "";
+          return `- ${item.title}${src}`;
+        });
+        return { label: "News", content: lines.join("\n") };
+      }
     } catch (err) {
       logger.warn({ err, tenantId }, "Daily briefing: news section failed");
       return null;
@@ -319,7 +350,7 @@ export class DailyBriefingService {
 - Use plain text only -- no markdown, no emojis, no bold/italic
 - Use line breaks and dashes for structure
 - If there are email drafts, mention them and how to act on them
-- For news headlines, pick the 3-5 most relevant/important and present briefly
+- For news, each item has a HEADLINE and TAKEAWAY -- present them naturally (e.g. "headline -- takeaway")
 - End with a brief "Anything you want me to help with?" or similar
 - Keep the total message under 2000 characters`,
           },
