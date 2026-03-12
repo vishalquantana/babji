@@ -294,6 +294,35 @@ export class MessageHandler {
         // If "connect" was typed but we can't match the provider, fall through to Brain
       }
 
+      // ── Handle "stop reminding" intent for connect reminders ──
+      const stopReminderRe = /\b(stop\s+remind|don'?t\s+remind|no\s+more\s+remind|stop\s+nag)/i;
+      if (stopReminderRe.test(message.text)) {
+        const reminderJob = await this.deps.db.query.scheduledJobs.findFirst({
+          where: and(
+            eq(schema.scheduledJobs.tenantId, tenantId),
+            eq(schema.scheduledJobs.jobType, "connect_reminder"),
+            eq(schema.scheduledJobs.status, "active"),
+          ),
+        });
+        if (reminderJob) {
+          const tz = tenant.timezone || "UTC";
+          const nextRun = new Date(nextUtcForLocalTime("18:00", tz).getTime() + 6 * 86_400_000);
+          const payload = (reminderJob.payload || {}) as { reminderCount?: number; maxReminders?: number };
+          await this.deps.db.update(schema.scheduledJobs)
+            .set({
+              scheduledAt: nextRun,
+              lastRunAt: new Date(),
+              payload: { reminderCount: payload.reminderCount ?? 0, maxReminders: payload.maxReminders ?? 4 },
+            })
+            .where(eq(schema.scheduledJobs.id, reminderJob.id));
+          await this.deps.db.update(schema.tenants)
+            .set({ connectReminderStatus: "snoozed" } as Record<string, unknown>)
+            .where(eq(schema.tenants.id, tenantId));
+          logger.info({ tenantId }, "Connect reminder snoozed by user request");
+          // Don't return — let the message also flow through Brain for a natural response
+        }
+      }
+
       // Build a unique session identifier per channel + sender
       const sessionId = `${channel}-${sender}`;
 
