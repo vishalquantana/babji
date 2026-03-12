@@ -238,6 +238,38 @@ async function main() {
         });
         logger.info({ tenantId: tenant.id }, "Seeded weekly memory_scan job for existing tenant");
       }
+
+      // Seed connect_reminder for tenants missing Gmail or Calendar
+      const tenantConnections = await db.query.serviceConnections.findMany({
+        where: eq(schema.serviceConnections.tenantId, tenant.id),
+      });
+      const hasGmail = tenantConnections.some((c) => c.provider === "gmail");
+      const hasCalendar = tenantConnections.some((c) => c.provider === "google_calendar");
+      const reminderStatus = (tenant as Record<string, unknown>).connectReminderStatus as string | null;
+
+      if (!hasGmail || !hasCalendar) {
+        if (reminderStatus === "active" || reminderStatus === "snoozed" || reminderStatus === null) {
+          const existingReminder = await db.query.scheduledJobs.findFirst({
+            where: and(
+              eq(schema.scheduledJobs.tenantId, tenant.id),
+              eq(schema.scheduledJobs.jobType, "connect_reminder"),
+            ),
+          });
+          if (!existingReminder) {
+            const tz = tenant.timezone || "UTC";
+            await db.insert(schema.scheduledJobs).values({
+              tenantId: tenant.id,
+              jobType: "connect_reminder",
+              scheduleType: "daily",
+              scheduledAt: nextUtcForLocalTime("18:00", tz),
+              recurrenceRule: "18:00",
+              payload: { reminderCount: 0, maxReminders: 4 },
+              status: "active",
+            });
+            logger.info({ tenantId: tenant.id }, "Seeded connect_reminder job for existing tenant");
+          }
+        }
+      }
     }
   } catch (err) {
     logger.error({ err }, "Failed to seed daily_briefing/memory_scan for existing tenants");
