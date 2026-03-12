@@ -155,7 +155,37 @@ pnpm --filter @babji/gateway test   # vitest
 - **Auto-creates tickets**: `AdminNotifier` creates Jira tickets when skill requests come in (`packages/gateway/src/admin-notifier.ts`)
 
 ### Open Jira Tickets
-No open tickets currently. Last completed: BAB-3 (general_research skill, Done).
+- BAB-41: LinkedIn Posting Skill
+- BAB-42: Facebook Ads Management Skill
+- BAB-43: Twitter/X Posting Skill
+- BAB-44: Instagram Posting Skill
+
+## Jira Automation Loop
+
+A Claude Code `/loop` skill that automates the development workflow:
+
+### How It Works
+- Runs every 5 minutes via `/loop 5m /jira-auto`
+- **Phase 1 (Triage):** Fetches "To Do" tickets, auto-moves bugs to "Approved to Build"
+- **Phase 2 (Work Check):** If nothing is "In Progress", picks up highest-priority "Approved to Build" ticket
+- **Phase 3 (Execute):** Codes, tests, deploys, transitions to "Ready for QA"
+- If blocked: moves to "Blocked for Human" + Jira comment + terminal message + Telegram notification
+
+### Bug Detection
+Auto-approved if issue type is "Bug" OR summary/description contains: 403, 401, 404, 500, 502, 503, error, crash, broken, fix, bug, fail, down, not working, exception
+
+### Board Statuses
+To Do → Approved to Build → In Progress → Ready for QA → Done (+ Blocked for Human)
+
+### Files
+- `.claude/commands/jira-auto.md` — automation prompt
+- `.env.local` — local Jira + Telegram credentials (gitignored)
+
+### Start/Stop
+```bash
+/loop 5m /jira-auto      # start
+cancel the jira-auto loop # stop
+```
 
 ## Database Tables (Drizzle ORM)
 - `tenants` - User accounts (name, phone, telegramUserId, plan, credits, connectReminderStatus)
