@@ -2,11 +2,32 @@ import type { SkillHandler } from "@babji/agent";
 
 const GRAPH_API_BASE = "https://graph.facebook.com/v21.0";
 
+export interface ScheduledFacebookPayload {
+  page_id: string;
+  message: string;
+  link?: string;
+}
+
+export interface ScheduledFacebookInfo {
+  jobId: string;
+  scheduledAt: string;
+  message: string;
+  hasLink: boolean;
+}
+
+export interface FacebookPagesDeps {
+  schedulePost?: (scheduledAt: Date, payload: ScheduledFacebookPayload) => Promise<string>;
+  listScheduledPosts?: () => Promise<ScheduledFacebookInfo[]>;
+  cancelScheduledPost?: (jobId: string) => Promise<boolean>;
+}
+
 export class FacebookPagesHandler implements SkillHandler {
   private accessToken: string;
+  private deps: FacebookPagesDeps;
 
-  constructor(accessToken: string) {
+  constructor(accessToken: string, deps?: FacebookPagesDeps) {
     this.accessToken = accessToken;
+    this.deps = deps || {};
   }
 
   async execute(actionName: string, params: Record<string, unknown>): Promise<unknown> {
@@ -20,6 +41,16 @@ export class FacebookPagesHandler implements SkillHandler {
       case "get_insights":
         this.requireParam(params, "page_id", actionName);
         return this.getInsights(params);
+      case "schedule_post":
+        this.requireParam(params, "page_id", actionName);
+        this.requireParam(params, "message", actionName);
+        this.requireParam(params, "scheduled_time", actionName);
+        return this.schedulePost(params);
+      case "list_scheduled_posts":
+        return this.listScheduledPosts();
+      case "cancel_scheduled_post":
+        this.requireParam(params, "job_id", actionName);
+        return this.cancelScheduledPost(params);
       default:
         throw new Error(`Unknown FacebookPages action: ${actionName}`);
     }
@@ -171,5 +202,63 @@ export class FacebookPagesHandler implements SkillHandler {
     } catch (err) {
       this.wrapApiError("get_insights", err);
     }
+  }
+
+  // ── Scheduling ──────────────────────────────────────────
+
+  private async schedulePost(params: Record<string, unknown>) {
+    if (!this.deps.schedulePost) {
+      throw new Error("Scheduling is not available. Please post directly using create_post.");
+    }
+
+    const scheduledTime = new Date(params.scheduled_time as string);
+    if (isNaN(scheduledTime.getTime())) {
+      throw new Error("Invalid scheduled_time. Use ISO 8601 format.");
+    }
+    if (scheduledTime <= new Date()) {
+      throw new Error("Scheduled time must be in the future. Use create_post for immediate posting.");
+    }
+
+    const payload: ScheduledFacebookPayload = {
+      page_id: params.page_id as string,
+      message: params.message as string,
+      link: params.link as string | undefined,
+    };
+
+    const jobId = await this.deps.schedulePost(scheduledTime, payload);
+
+    return {
+      scheduled: true,
+      jobId,
+      scheduledAt: scheduledTime.toISOString(),
+      message: payload.message.substring(0, 100) + (payload.message.length > 100 ? "..." : ""),
+      hint: `Your Facebook post is scheduled for ${scheduledTime.toISOString()}. It will be published automatically.`,
+    };
+  }
+
+  private async listScheduledPosts() {
+    if (!this.deps.listScheduledPosts) {
+      throw new Error("Scheduling is not available.");
+    }
+    const posts = await this.deps.listScheduledPosts();
+    return {
+      scheduled_posts: posts,
+      count: posts.length,
+      hint: posts.length === 0
+        ? "No scheduled Facebook posts."
+        : "Use cancel_scheduled_post with the job ID to cancel.",
+    };
+  }
+
+  private async cancelScheduledPost(params: Record<string, unknown>) {
+    if (!this.deps.cancelScheduledPost) {
+      throw new Error("Scheduling is not available.");
+    }
+    const jobId = params.job_id as string;
+    const cancelled = await this.deps.cancelScheduledPost(jobId);
+    if (!cancelled) {
+      throw new Error("Scheduled post not found or already published.");
+    }
+    return { cancelled: true, jobId };
   }
 }

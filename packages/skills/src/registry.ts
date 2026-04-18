@@ -66,6 +66,27 @@ const gmailSkill: SkillDefinition = {
       },
     },
     {
+      name: "create_draft",
+      description: "Create a draft email in the user's Gmail drafts folder for review before sending.",
+      parameters: {
+        to: {
+          type: "string",
+          required: true,
+          description: "Recipient email address",
+        },
+        subject: {
+          type: "string",
+          required: true,
+          description: "Email subject line",
+        },
+        body: {
+          type: "string",
+          required: true,
+          description: "Email body text",
+        },
+      },
+    },
+    {
       name: "archive_emails",
       description: "Archive emails by removing them from the inbox.",
       parameters: {
@@ -1141,7 +1162,7 @@ const generalResearchSkill: SkillDefinition = {
 const imageGenSkill: SkillDefinition = {
   name: "image_gen",
   displayName: "Image Generation",
-  description: "Generate professional images from text descriptions. First enhances the user's brief into a detailed prompt, then generates the image.",
+  description: "Generate professional images from text descriptions including posters, social media graphics, banners, and marketing materials. First enhances the user's brief into a detailed prompt with design principles, then generates the image. Use quality='pro' for marketing/poster work.",
   actions: [
     {
       name: "enhance_prompt",
@@ -1353,7 +1374,7 @@ const linkedinSkill: SkillDefinition = {
   actions: [
     {
       name: "create_post",
-      description: "Create a LinkedIn post. Supports text, image, or article/link sharing.",
+      description: "Create a LinkedIn post. Supports text, image, or article/link sharing. Limited to 2 posts per day.",
       parameters: {
         text: {
           type: "string",
@@ -1420,11 +1441,407 @@ const linkedinSkill: SkillDefinition = {
         },
       },
     },
+    {
+      name: "schedule_post",
+      description: "Schedule a LinkedIn post for future publication. The post will be automatically published at the specified time. Use the user's timezone for scheduling.",
+      parameters: {
+        text: {
+          type: "string",
+          required: true,
+          description: "The post text/commentary",
+        },
+        scheduled_time: {
+          type: "string",
+          required: true,
+          description: "ISO 8601 datetime string for when to publish (e.g. '2026-03-16T09:00:00'). Interpret relative times like 'tomorrow at 9am' using the user's timezone.",
+        },
+        image_url: {
+          type: "string",
+          required: false,
+          description: "URL of an image to attach when the post is published",
+        },
+        article_url: {
+          type: "string",
+          required: false,
+          description: "URL of an article/link to share",
+        },
+        article_title: {
+          type: "string",
+          required: false,
+          description: "Title for the shared article (optional, used with article_url)",
+        },
+        visibility: {
+          type: "string",
+          required: false,
+          description: "Post visibility: 'PUBLIC' (default) or 'CONNECTIONS'",
+        },
+      },
+    },
+    {
+      name: "list_scheduled_posts",
+      description: "List all pending scheduled LinkedIn posts for the user.",
+      parameters: {},
+    },
+    {
+      name: "cancel_scheduled_post",
+      description: "Cancel a previously scheduled LinkedIn post.",
+      parameters: {
+        job_id: {
+          type: "string",
+          required: true,
+          description: "The scheduled post job ID (from list_scheduled_posts)",
+        },
+      },
+    },
   ],
   creditsPerAction: 1,
 };
 
-const allSkills: SkillDefinition[] = [gmailSkill, calendarSkill, googleAdsSkill, googleAnalyticsSkill, jiraSkill, checkWithTeacherSkill, peopleSkill, generalResearchSkill, imageGenSkill, linkedinSkill];
+const googleDocsSkill: SkillDefinition = {
+  name: "google_docs",
+  displayName: "Google Docs",
+  description: "Create and share Google Docs. Export Babji research reports to Google Docs, or create new documents (summaries, memos, briefs) from conversation context.",
+  creditsPerAction: 1,
+  requiresAuth: {
+    provider: "google_docs",
+    scopes: ["https://www.googleapis.com/auth/drive.file"],
+  },
+  actions: [
+    {
+      name: "export_report",
+      description: "Export an existing Babji research report to a Google Doc. The report becomes a shareable Google Doc link.",
+      parameters: {
+        report_id: {
+          type: "string",
+          required: true,
+          description: "The Babji report ID to export (the short ID from the report URL)",
+        },
+      },
+    },
+    {
+      name: "create_document",
+      description: "Create a new Google Doc from markdown content. Use this to generate summary documents, memos, briefs, or any formatted document from conversation context.",
+      parameters: {
+        title: {
+          type: "string",
+          required: true,
+          description: "Document title",
+        },
+        content: {
+          type: "string",
+          required: true,
+          description: "Document content in markdown format",
+        },
+      },
+    },
+  ],
+};
+
+const instagramSkill: SkillDefinition = {
+  name: "instagram",
+  displayName: "Instagram",
+  description: "Post photos and view your Instagram Business account. Requires a connected Facebook/Instagram account.",
+  requiresAuth: {
+    provider: "meta",
+    scopes: ["instagram_basic", "instagram_content_publish"],
+  },
+  actions: [
+    {
+      name: "get_profile",
+      description: "Get the user's Instagram Business profile info.",
+      parameters: {
+        ig_user_id: {
+          type: "string",
+          required: true,
+          description: "The Instagram Business user ID (from service connection metadata)",
+        },
+      },
+    },
+    {
+      name: "list_posts",
+      description: "List recent Instagram posts with engagement metrics.",
+      parameters: {
+        ig_user_id: {
+          type: "string",
+          required: true,
+          description: "The Instagram Business user ID",
+        },
+        max_results: {
+          type: "number",
+          required: false,
+          description: "Number of posts to return (1-50, default 10)",
+        },
+      },
+    },
+    {
+      name: "create_post",
+      description: "Create an Instagram post. REQUIRES an image URL — Instagram does not support text-only posts. Use the image_gen skill first if you need to generate an image.",
+      parameters: {
+        ig_user_id: {
+          type: "string",
+          required: true,
+          description: "The Instagram Business user ID",
+        },
+        image_url: {
+          type: "string",
+          required: true,
+          description: "Public URL of the image to post (must be JPEG or PNG, accessible via HTTP)",
+        },
+        caption: {
+          type: "string",
+          required: false,
+          description: "Post caption with optional hashtags",
+        },
+      },
+    },
+    {
+      name: "schedule_post",
+      description: "Schedule an Instagram post for future publication. REQUIRES an image URL.",
+      parameters: {
+        ig_user_id: {
+          type: "string",
+          required: true,
+          description: "The Instagram Business user ID",
+        },
+        image_url: {
+          type: "string",
+          required: true,
+          description: "Public URL of the image to post",
+        },
+        caption: {
+          type: "string",
+          required: false,
+          description: "Post caption with optional hashtags",
+        },
+        scheduled_time: {
+          type: "string",
+          required: true,
+          description: "ISO 8601 datetime for when to publish",
+        },
+      },
+    },
+    {
+      name: "list_scheduled_posts",
+      description: "List all pending scheduled Instagram posts.",
+      parameters: {},
+    },
+    {
+      name: "cancel_scheduled_post",
+      description: "Cancel a scheduled Instagram post.",
+      parameters: {
+        job_id: {
+          type: "string",
+          required: true,
+          description: "The scheduled post job ID",
+        },
+      },
+    },
+  ],
+  creditsPerAction: 1,
+};
+
+const facebookPagesSkill: SkillDefinition = {
+  name: "facebook_pages",
+  displayName: "Facebook Pages",
+  description: "Post to Facebook Pages and view page insights. Requires a connected Facebook account with page management permissions.",
+  requiresAuth: {
+    provider: "meta",
+    scopes: ["pages_manage_posts"],
+  },
+  actions: [
+    {
+      name: "list_pages",
+      description: "List Facebook Pages the user manages.",
+      parameters: {
+        max_results: {
+          type: "number",
+          required: false,
+          description: "Number of pages to return (1-50, default 10)",
+        },
+      },
+    },
+    {
+      name: "create_post",
+      description: "Create a post on a Facebook Page.",
+      parameters: {
+        page_id: {
+          type: "string",
+          required: true,
+          description: "The Facebook Page ID (from list_pages)",
+        },
+        message: {
+          type: "string",
+          required: true,
+          description: "The post text",
+        },
+        link: {
+          type: "string",
+          required: false,
+          description: "Optional URL to share with the post",
+        },
+      },
+    },
+    {
+      name: "get_insights",
+      description: "Get analytics/insights for a Facebook Page.",
+      parameters: {
+        page_id: {
+          type: "string",
+          required: true,
+          description: "The Facebook Page ID",
+        },
+        period: {
+          type: "string",
+          required: false,
+          description: "Aggregation period: 'day', 'week', or 'days_28' (default: 'day')",
+        },
+      },
+    },
+    {
+      name: "schedule_post",
+      description: "Schedule a Facebook Page post for future publication.",
+      parameters: {
+        page_id: {
+          type: "string",
+          required: true,
+          description: "The Facebook Page ID",
+        },
+        message: {
+          type: "string",
+          required: true,
+          description: "The post text",
+        },
+        link: {
+          type: "string",
+          required: false,
+          description: "Optional URL to share",
+        },
+        scheduled_time: {
+          type: "string",
+          required: true,
+          description: "ISO 8601 datetime for when to publish",
+        },
+      },
+    },
+    {
+      name: "list_scheduled_posts",
+      description: "List all pending scheduled Facebook Page posts.",
+      parameters: {},
+    },
+    {
+      name: "cancel_scheduled_post",
+      description: "Cancel a scheduled Facebook Page post.",
+      parameters: {
+        job_id: {
+          type: "string",
+          required: true,
+          description: "The scheduled post job ID",
+        },
+      },
+    },
+  ],
+  creditsPerAction: 1,
+};
+
+const socialMediaSkill: SkillDefinition = {
+  name: "social_media",
+  displayName: "Social Media",
+  description: "Post, schedule, and manage content across Instagram, Facebook, LinkedIn, X/Twitter, and other social media platforms via Postiz.",
+  actions: [
+    {
+      name: "list_channels",
+      description: "List all connected social media channels (Instagram, Facebook, LinkedIn, X, etc.).",
+      parameters: {},
+    },
+    {
+      name: "create_post",
+      description: "Publish a post immediately to a social media channel.",
+      parameters: {
+        channel_id: {
+          type: "string",
+          required: true,
+          description: "The channel ID to post to (get from list_channels)",
+        },
+        content: {
+          type: "string",
+          required: true,
+          description: "The post text content (with hashtags, mentions, etc.)",
+        },
+        image_urls: {
+          type: "array",
+          required: false,
+          description: "Optional array of image URLs to attach to the post",
+        },
+        platform: {
+          type: "string",
+          required: false,
+          description: "Platform type hint (instagram, facebook, linkedin, x, threads, etc.)",
+        },
+      },
+    },
+    {
+      name: "schedule_post",
+      description: "Schedule a post for future publication on a social media channel.",
+      parameters: {
+        channel_id: {
+          type: "string",
+          required: true,
+          description: "The channel ID to post to (get from list_channels)",
+        },
+        content: {
+          type: "string",
+          required: true,
+          description: "The post text content",
+        },
+        scheduled_time: {
+          type: "string",
+          required: true,
+          description: "ISO 8601 datetime for when to publish (must be in the future)",
+        },
+        image_urls: {
+          type: "array",
+          required: false,
+          description: "Optional array of image URLs to attach to the post",
+        },
+        platform: {
+          type: "string",
+          required: false,
+          description: "Platform type hint (instagram, facebook, linkedin, x, threads, etc.)",
+        },
+      },
+    },
+    {
+      name: "list_posts",
+      description: "List all posts (published and scheduled).",
+      parameters: {},
+    },
+    {
+      name: "delete_post",
+      description: "Delete a post by its ID.",
+      parameters: {
+        post_id: {
+          type: "string",
+          required: true,
+          description: "The post ID to delete",
+        },
+      },
+    },
+    {
+      name: "upload_image",
+      description: "Upload an image from a URL for use in social media posts.",
+      parameters: {
+        url: {
+          type: "string",
+          required: true,
+          description: "The image URL to upload",
+        },
+      },
+    },
+  ],
+  creditsPerAction: 1,
+};
+
+const allSkills: SkillDefinition[] = [gmailSkill, calendarSkill, googleAdsSkill, googleAnalyticsSkill, jiraSkill, checkWithTeacherSkill, peopleSkill, generalResearchSkill, imageGenSkill, linkedinSkill, instagramSkill, facebookPagesSkill, googleDocsSkill, socialMediaSkill];
 
 /**
  * Load all registered skill definitions.

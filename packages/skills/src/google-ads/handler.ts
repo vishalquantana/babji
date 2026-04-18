@@ -142,11 +142,16 @@ export class GoogleAdsHandler implements SkillHandler {
       } catch {
         errorMsg = `HTTP ${res.status}`;
       }
-      // Report specific API-level issues to teacher/Jira
+      // Report specific API-level issues to teacher/Jira and provide user-friendly messages
       if (errorMsg.includes("test accounts") || errorMsg.includes("NOT_APPROVED")) {
         this.reportIssue("google_ads_test_token", `Google Ads API rejected request: ${errorMsg}`);
+        throw new Error("Your Google Ads developer token only has Test access and cannot query production accounts. Please contact your administrator to upgrade the token to Basic access.");
       } else if (res.status === 403) {
-        this.reportIssue("google_ads_permission_" + res.status, `Google Ads API permission error: ${errorMsg}`);
+        this.reportIssue("google_ads_permission_403", `Google Ads API permission error: ${errorMsg}`);
+        if (errorMsg.includes("not yet enabled") || errorMsg.includes("deactivated")) {
+          throw new Error("Your Google Ads account is not accessible — it may not be enabled yet or has been deactivated. Please check that your account is active in the Google Ads UI (billing must be set up) and that you granted Ads permissions when connecting.");
+        }
+        throw new Error("Google Ads permission denied. This can happen if: (1) your account is not active, (2) you didn't grant Ads permissions during connection — try typing 'connect google_ads' to re-authorize, or (3) the account requires access through a Manager (MCC) account.");
       }
       throw new Error(errorMsg);
     }

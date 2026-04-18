@@ -39,6 +39,15 @@ export const providers: Record<string, ProviderConfig> = {
     authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
     tokenUrl: "https://oauth2.googleapis.com/token",
   },
+  google_docs: {
+    displayName: "Google Docs",
+    description: "Create and share documents in Google Drive",
+    clientIdEnv: "GOOGLE_CLIENT_ID",
+    clientSecretEnv: "GOOGLE_CLIENT_SECRET",
+    scopes: ["https://www.googleapis.com/auth/drive.file"],
+    authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+    tokenUrl: "https://oauth2.googleapis.com/token",
+  },
   google_analytics: {
     displayName: "Google Analytics",
     description: "View website traffic, audience, and conversion data",

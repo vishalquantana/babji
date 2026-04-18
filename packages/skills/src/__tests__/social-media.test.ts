@@ -390,7 +390,10 @@ describe("LinkedInHandler", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    handler = new LinkedInHandler("fake-token");
+    handler = new LinkedInHandler("fake-token", {
+      countTodayPosts: async () => 0,
+      dailyPostLimit: 2,
+    });
   });
 
   describe("get_profile", () => {

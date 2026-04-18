@@ -80,6 +80,7 @@ export class PromptBuilder {
       parts.push("3. Immediately call babji.connect_service to generate a sign-in link. Do NOT ask 'would you like me to connect?' or wait for permission -- just generate the link and include it in your reply so the user can tap it right away.");
       parts.push("IMPORTANT: Always call babji.connect_service proactively in the SAME response. Never make the user ask twice. The tool returns a short URL -- include it in your reply.");
       parts.push("NEVER tell the user to type 'connect X'. NEVER make up a URL. Always use the connect_service tool to generate the real link.");
+      parts.push("WARNING: URLs like babji.ai, babji.com, or any domain you imagine DO NOT EXIST. The ONLY way to get a valid connect URL is by calling the babji.connect_service tool. If you output a URL you did not receive from a tool call, you are hallucinating.");
       for (const skill of disconnectedSkills) {
         parts.push(`- ${skill.displayName}: ${skill.description} (service_name: "${skill.name}")`);
       }

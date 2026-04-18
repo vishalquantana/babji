@@ -2,11 +2,32 @@ import type { SkillHandler } from "@babji/agent";
 
 const GRAPH_API_BASE = "https://graph.facebook.com/v21.0";
 
+export interface ScheduledInstagramPayload {
+  ig_user_id: string;
+  image_url: string;
+  caption?: string;
+}
+
+export interface ScheduledInstagramInfo {
+  jobId: string;
+  scheduledAt: string;
+  caption: string;
+  hasImage: boolean;
+}
+
+export interface InstagramDeps {
+  schedulePost?: (scheduledAt: Date, payload: ScheduledInstagramPayload) => Promise<string>;
+  listScheduledPosts?: () => Promise<ScheduledInstagramInfo[]>;
+  cancelScheduledPost?: (jobId: string) => Promise<boolean>;
+}
+
 export class InstagramHandler implements SkillHandler {
   private accessToken: string;
+  private deps: InstagramDeps;
 
-  constructor(accessToken: string) {
+  constructor(accessToken: string, deps?: InstagramDeps) {
     this.accessToken = accessToken;
+    this.deps = deps || {};
   }
 
   async execute(actionName: string, params: Record<string, unknown>): Promise<unknown> {
@@ -21,6 +42,16 @@ export class InstagramHandler implements SkillHandler {
         this.requireParam(params, "ig_user_id", actionName);
         this.requireParam(params, "image_url", actionName);
         return this.createPost(params);
+      case "schedule_post":
+        this.requireParam(params, "ig_user_id", actionName);
+        this.requireParam(params, "image_url", actionName);
+        this.requireParam(params, "scheduled_time", actionName);
+        return this.schedulePost(params);
+      case "list_scheduled_posts":
+        return this.listScheduledPosts();
+      case "cancel_scheduled_post":
+        this.requireParam(params, "job_id", actionName);
+        return this.cancelScheduledPost(params);
       default:
         throw new Error(`Unknown Instagram action: ${actionName}`);
     }
@@ -185,5 +216,64 @@ export class InstagramHandler implements SkillHandler {
     } catch (err) {
       this.wrapApiError("create_post", err);
     }
+  }
+
+  // ── Scheduling ──────────────────────────────────────────
+
+  private async schedulePost(params: Record<string, unknown>) {
+    if (!this.deps.schedulePost) {
+      throw new Error("Scheduling is not available. Please post directly using create_post.");
+    }
+
+    const scheduledTime = new Date(params.scheduled_time as string);
+    if (isNaN(scheduledTime.getTime())) {
+      throw new Error("Invalid scheduled_time. Use ISO 8601 format.");
+    }
+    if (scheduledTime <= new Date()) {
+      throw new Error("Scheduled time must be in the future. Use create_post for immediate posting.");
+    }
+
+    const payload: ScheduledInstagramPayload = {
+      ig_user_id: params.ig_user_id as string,
+      image_url: params.image_url as string,
+      caption: params.caption as string | undefined,
+    };
+
+    const jobId = await this.deps.schedulePost(scheduledTime, payload);
+    const caption = payload.caption || "";
+
+    return {
+      scheduled: true,
+      jobId,
+      scheduledAt: scheduledTime.toISOString(),
+      caption: caption.substring(0, 100) + (caption.length > 100 ? "..." : ""),
+      hint: `Your Instagram post is scheduled for ${scheduledTime.toISOString()}. It will be published automatically.`,
+    };
+  }
+
+  private async listScheduledPosts() {
+    if (!this.deps.listScheduledPosts) {
+      throw new Error("Scheduling is not available.");
+    }
+    const posts = await this.deps.listScheduledPosts();
+    return {
+      scheduled_posts: posts,
+      count: posts.length,
+      hint: posts.length === 0
+        ? "No scheduled Instagram posts."
+        : "Use cancel_scheduled_post with the job ID to cancel.",
+    };
+  }
+
+  private async cancelScheduledPost(params: Record<string, unknown>) {
+    if (!this.deps.cancelScheduledPost) {
+      throw new Error("Scheduling is not available.");
+    }
+    const jobId = params.job_id as string;
+    const cancelled = await this.deps.cancelScheduledPost(jobId);
+    if (!cancelled) {
+      throw new Error("Scheduled post not found or already published.");
+    }
+    return { cancelled: true, jobId };
   }
 }

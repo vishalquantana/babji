@@ -77,7 +77,7 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
       retrieve: vi.fn().mockResolvedValue(null),
       store: vi.fn().mockResolvedValue(undefined),
     },
-    oauthPortalUrl: "https://auth.babji.ai",
+    oauthPortalUrl: "https://babji.quantana.top",
     googleClientId: "test-client-id",
     atlassianClientId: "test-atlassian-client-id",
     ...overrides,

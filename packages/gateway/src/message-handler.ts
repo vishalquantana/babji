@@ -1,12 +1,12 @@
 import { randomBytes } from "node:crypto";
-import { eq, and, isNull } from "drizzle-orm";
+import { eq, and, isNull, gte, sql } from "drizzle-orm";
 import type { BabjiMessage, OutboundMessage, SkillDefinition } from "@babji/types";
 import { Brain, PromptBuilder, ToolExecutor, skillsToAiTools, MemoryExtractor } from "@babji/agent";
 import type { LlmClient, PersonFact } from "@babji/agent";
 import { MemoryManager, SessionStore } from "@babji/memory";
 
 import { TokenVault } from "@babji/crypto";
-import { GmailHandler, GoogleCalendarHandler, GoogleAdsHandler, GoogleAnalyticsHandler, JiraHandler, LinkedInHandler, PeopleHandler, TodosHandler, GeneralResearchHandler, ImageGenHandler, ImageStore } from "@babji/skills";
+import { GmailHandler, GoogleCalendarHandler, GoogleAdsHandler, GoogleAnalyticsHandler, GoogleDocsHandler, JiraHandler, LinkedInHandler, InstagramHandler, FacebookPagesHandler, PostizHandler, PeopleHandler, TodosHandler, GeneralResearchHandler, ImageGenHandler, ImageStore } from "@babji/skills";
 import type { S3Config } from "@babji/skills";
 import type { SkillRequestManager } from "@babji/skills";
 import type { Database } from "@babji/db";
@@ -23,6 +23,9 @@ import type { UsageTracker } from "./usage-tracker.js";
 
 /** Pattern to detect "connect <something>" commands */
 const CONNECT_PREFIX_RE = /^connect\s+(?:my\s+|to\s+(?:my\s+)?)?(.+?)\s*$/i;
+
+/** Pattern to detect "disconnect/logout/remove <something>" commands */
+const DISCONNECT_PREFIX_RE = /^(?:disconnect|logout|log\s*out|remove|unlink)\s+(?:my\s+|from\s+(?:my\s+)?)?(.+?)\s*$/i;
 
 /** Known provider names and common misspellings/aliases */
 const PROVIDER_ALIASES: Record<string, string> = {
@@ -105,6 +108,7 @@ export interface MessageHandlerDeps {
   googleClientId: string;
   atlassianClientId: string;
   linkedinClientId: string;
+  metaClientId: string;
   googleAdsDeveloperToken: string;
   peopleConfig?: {
     enabled: boolean;
@@ -295,6 +299,15 @@ export class MessageHandler {
         // If "connect" was typed but we can't match the provider, fall through to Brain
       }
 
+      // ── Handle "disconnect/logout <provider>" command ──
+      const disconnectMatch = message.text.trim().match(DISCONNECT_PREFIX_RE);
+      if (disconnectMatch) {
+        const provider = matchProvider(disconnectMatch[1]);
+        if (provider) {
+          return this.handleDisconnect(tenantId, provider, channel, sender);
+        }
+      }
+
       // ── Handle "stop reminding" intent for connect reminders ──
       const stopReminderRe = /\b(stop\s+remind|don'?t\s+remind|no\s+more\s+remind|stop\s+nag)/i;
       if (stopReminderRe.test(message.text)) {
@@ -393,6 +406,22 @@ export class MessageHandler {
         if (conn.provider === "google_analytics") {
           toolExecutor.registerSkill("google_analytics", new GoogleAnalyticsHandler(accessToken));
         }
+        if (conn.provider === "google_docs") {
+          toolExecutor.registerSkill("google_docs", new GoogleDocsHandler(accessToken, {
+            getReportMarkdown: async (reportId: string) => {
+              const report = await this.deps.db.query.reports.findFirst({
+                where: eq(schema.reports.id, reportId),
+              });
+              if (!report) return null;
+              try {
+                const { readFile } = await import("node:fs/promises");
+                return await readFile(report.filePath, "utf-8");
+              } catch {
+                return null;
+              }
+            },
+          }));
+        }
         if (conn.provider === "jira") {
           // Retrieve cloudId stored alongside the token during OAuth callback
           const tokenBlob = await this.deps.vault.retrieve(tenantId, "jira") as { cloud_id?: string } | null;
@@ -411,7 +440,168 @@ export class MessageHandler {
         }
 
         if (conn.provider === "linkedin") {
-          toolExecutor.registerSkill("linkedin", new LinkedInHandler(accessToken));
+          toolExecutor.registerSkill("linkedin", new LinkedInHandler(accessToken, {
+            countTodayPosts: async () => {
+              const startOfDay = new Date();
+              startOfDay.setHours(0, 0, 0, 0);
+              const rows = await this.deps.db
+                .select({ count: sql<number>`count(*)::int` })
+                .from(schema.auditLog)
+                .where(
+                  and(
+                    eq(schema.auditLog.tenantId, tenantId),
+                    eq(schema.auditLog.action, "message_processed"),
+                    gte(schema.auditLog.createdAt, startOfDay),
+                    sql`${schema.auditLog.metadata}::jsonb -> 'toolCalls' @> '["linkedin.create_post"]'::jsonb`,
+                  ),
+                );
+              return rows[0]?.count ?? 0;
+            },
+            dailyPostLimit: 2,
+            schedulePost: async (scheduledAt, payload) => {
+              const [row] = await this.deps.db.insert(schema.scheduledJobs).values({
+                tenantId,
+                jobType: "scheduled_linkedin_post",
+                scheduleType: "once",
+                scheduledAt,
+                payload: payload as unknown as Record<string, unknown>,
+                status: "active",
+              }).returning({ id: schema.scheduledJobs.id });
+              return row.id;
+            },
+            listScheduledPosts: async () => {
+              const jobs = await this.deps.db.query.scheduledJobs.findMany({
+                where: and(
+                  eq(schema.scheduledJobs.tenantId, tenantId),
+                  eq(schema.scheduledJobs.jobType, "scheduled_linkedin_post"),
+                  eq(schema.scheduledJobs.status, "active"),
+                ),
+              });
+              return jobs.map((j) => {
+                const p = (j.payload || {}) as Record<string, string | undefined>;
+                return {
+                  jobId: j.id,
+                  scheduledAt: j.scheduledAt.toISOString(),
+                  text: (p.text || "").substring(0, 100),
+                  hasImage: !!p.image_url,
+                  hasArticle: !!p.article_url,
+                };
+              });
+            },
+            cancelScheduledPost: async (jobId) => {
+              const job = await this.deps.db.query.scheduledJobs.findFirst({
+                where: and(
+                  eq(schema.scheduledJobs.id, jobId),
+                  eq(schema.scheduledJobs.tenantId, tenantId),
+                  eq(schema.scheduledJobs.jobType, "scheduled_linkedin_post"),
+                  eq(schema.scheduledJobs.status, "active"),
+                ),
+              });
+              if (!job) return false;
+              await this.deps.db.update(schema.scheduledJobs)
+                .set({ status: "completed", lastRunAt: new Date() })
+                .where(eq(schema.scheduledJobs.id, jobId));
+              return true;
+            },
+          }));
+        }
+
+        if (conn.provider === "meta") {
+          // Register Instagram skill
+          toolExecutor.registerSkill("instagram", new InstagramHandler(accessToken, {
+            schedulePost: async (scheduledAt, payload) => {
+              const [row] = await this.deps.db.insert(schema.scheduledJobs).values({
+                tenantId,
+                jobType: "scheduled_instagram_post",
+                scheduleType: "once",
+                scheduledAt,
+                payload: payload as unknown as Record<string, unknown>,
+                status: "active",
+              }).returning({ id: schema.scheduledJobs.id });
+              return row.id;
+            },
+            listScheduledPosts: async () => {
+              const jobs = await this.deps.db.query.scheduledJobs.findMany({
+                where: and(
+                  eq(schema.scheduledJobs.tenantId, tenantId),
+                  eq(schema.scheduledJobs.jobType, "scheduled_instagram_post"),
+                  eq(schema.scheduledJobs.status, "active"),
+                ),
+              });
+              return jobs.map((j) => {
+                const p = (j.payload || {}) as Record<string, string | undefined>;
+                return {
+                  jobId: j.id,
+                  scheduledAt: j.scheduledAt.toISOString(),
+                  caption: (p.caption || "").substring(0, 100),
+                  hasImage: !!p.image_url,
+                };
+              });
+            },
+            cancelScheduledPost: async (jobId: string) => {
+              const job = await this.deps.db.query.scheduledJobs.findFirst({
+                where: and(
+                  eq(schema.scheduledJobs.id, jobId),
+                  eq(schema.scheduledJobs.tenantId, tenantId),
+                  eq(schema.scheduledJobs.jobType, "scheduled_instagram_post"),
+                  eq(schema.scheduledJobs.status, "active"),
+                ),
+              });
+              if (!job) return false;
+              await this.deps.db.update(schema.scheduledJobs)
+                .set({ status: "completed", lastRunAt: new Date() })
+                .where(eq(schema.scheduledJobs.id, jobId));
+              return true;
+            },
+          }));
+
+          // Register Facebook Pages skill
+          toolExecutor.registerSkill("facebook_pages", new FacebookPagesHandler(accessToken, {
+            schedulePost: async (scheduledAt: Date, payload: { page_id: string; message: string; link?: string }) => {
+              const [row] = await this.deps.db.insert(schema.scheduledJobs).values({
+                tenantId,
+                jobType: "scheduled_facebook_post",
+                scheduleType: "once",
+                scheduledAt,
+                payload: payload as unknown as Record<string, unknown>,
+                status: "active",
+              }).returning({ id: schema.scheduledJobs.id });
+              return row.id;
+            },
+            listScheduledPosts: async () => {
+              const jobs = await this.deps.db.query.scheduledJobs.findMany({
+                where: and(
+                  eq(schema.scheduledJobs.tenantId, tenantId),
+                  eq(schema.scheduledJobs.jobType, "scheduled_facebook_post"),
+                  eq(schema.scheduledJobs.status, "active"),
+                ),
+              });
+              return jobs.map((j) => {
+                const p = (j.payload || {}) as Record<string, string | undefined>;
+                return {
+                  jobId: j.id,
+                  scheduledAt: j.scheduledAt.toISOString(),
+                  message: (p.message || "").substring(0, 100),
+                  hasLink: !!p.link,
+                };
+              });
+            },
+            cancelScheduledPost: async (jobId: string) => {
+              const job = await this.deps.db.query.scheduledJobs.findFirst({
+                where: and(
+                  eq(schema.scheduledJobs.id, jobId),
+                  eq(schema.scheduledJobs.tenantId, tenantId),
+                  eq(schema.scheduledJobs.jobType, "scheduled_facebook_post"),
+                  eq(schema.scheduledJobs.status, "active"),
+                ),
+              });
+              if (!job) return false;
+              await this.deps.db.update(schema.scheduledJobs)
+                .set({ status: "completed", lastRunAt: new Date() })
+                .where(eq(schema.scheduledJobs.id, jobId));
+              return true;
+            },
+          }));
         }
       }
 
@@ -862,13 +1052,35 @@ export class MessageHandler {
             insertGeneratedImage: async (row) => {
               await this.deps.db.insert(schema.generatedImages).values(row);
             },
+            createShortLink: async (url: string) => {
+              try {
+                const shortId = randomBytes(6).toString("base64url");
+                await this.deps.db.insert(schema.shortLinks).values({ id: shortId, url });
+                return `${this.deps.oauthPortalUrl}/link/${shortId}`;
+              } catch {
+                return null;
+              }
+            },
           },
         ));
       }
 
+      // ── Register social media handler (Postiz, no OAuth needed — uses platform API key) ──
+      const postizApiKey = process.env.POSTIZ_API_KEY;
+      if (postizApiKey) {
+        toolExecutor.registerSkill("social_media", new PostizHandler({
+          apiKey: postizApiKey,
+          baseUrl: process.env.POSTIZ_BASE_URL,
+        }));
+      }
+
       // ── Build AI SDK tool definitions only for connected skills ──
       const connectedSkills = this.deps.availableSkills.filter(
-        (s) => !s.requiresAuth || connectedProviders.includes(s.name)
+        (s) => {
+          // social_media needs POSTIZ_API_KEY, not OAuth
+          if (s.name === "social_media") return !!postizApiKey;
+          return !s.requiresAuth || connectedProviders.includes(s.name);
+        }
       );
       const aiTools = skillsToAiTools(connectedSkills);
 
@@ -1145,6 +1357,13 @@ export class MessageHandler {
       ],
       authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
     },
+    google_docs: {
+      displayName: "Google Docs",
+      scopes: [
+        "https://www.googleapis.com/auth/drive.file",
+      ],
+      authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+    },
     jira: {
       displayName: "Jira",
       scopes: [
@@ -1161,6 +1380,11 @@ export class MessageHandler {
       displayName: "LinkedIn",
       scopes: ["openid", "profile", "w_member_social"],
       authUrl: "https://www.linkedin.com/oauth/v2/authorization",
+    },
+    meta: {
+      displayName: "Instagram & Facebook",
+      scopes: ["pages_manage_posts", "instagram_basic", "instagram_content_publish"],
+      authUrl: "https://www.facebook.com/v19.0/dialog/oauth",
     },
   };
 
@@ -1185,11 +1409,14 @@ export class MessageHandler {
     // Build provider-specific OAuth params
     const isAtlassian = provider === "jira";
     const isLinkedIn = provider === "linkedin";
+    const isMeta = provider === "meta";
     const clientId = isAtlassian
       ? this.deps.atlassianClientId
       : isLinkedIn
         ? this.deps.linkedinClientId
-        : this.deps.googleClientId;
+        : isMeta
+          ? this.deps.metaClientId
+          : this.deps.googleClientId;
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: redirectUri,
@@ -1200,7 +1427,7 @@ export class MessageHandler {
     });
     if (isAtlassian) {
       params.set("audience", "api.atlassian.com");
-    } else if (!isLinkedIn) {
+    } else if (!isLinkedIn && !isMeta) {
       params.set("access_type", "offline");
     }
 
@@ -1247,6 +1474,55 @@ export class MessageHandler {
       channel: channel as "telegram" | "whatsapp" | "app",
       recipient: sender,
       text: `Click the link below to connect your ${link.displayName}:\n\n${url}`,
+    };
+  }
+
+  private async handleDisconnect(
+    tenantId: string,
+    provider: string,
+    channel: string,
+    sender: string,
+  ): Promise<OutboundMessage> {
+    const displayName = provider.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+    // Check if the connection exists
+    const existing = await this.deps.db.query.serviceConnections.findFirst({
+      where: and(
+        eq(schema.serviceConnections.tenantId, tenantId),
+        eq(schema.serviceConnections.provider, provider),
+      ),
+    });
+
+    if (!existing) {
+      return {
+        tenantId,
+        channel: channel as "telegram" | "whatsapp" | "app",
+        recipient: sender,
+        text: `You don't have ${displayName} connected, so there's nothing to disconnect.`,
+      };
+    }
+
+    // Delete the service connection from DB
+    await this.deps.db.delete(schema.serviceConnections)
+      .where(and(
+        eq(schema.serviceConnections.tenantId, tenantId),
+        eq(schema.serviceConnections.provider, provider),
+      ));
+
+    // Remove stored tokens from vault
+    try {
+      await this.deps.vault.delete(tenantId, provider);
+    } catch {
+      // Vault removal is best-effort
+    }
+
+    logger.info({ tenantId, provider }, "User disconnected service");
+
+    return {
+      tenantId,
+      channel: channel as "telegram" | "whatsapp" | "app",
+      recipient: sender,
+      text: `Done — I've disconnected your ${displayName} account. I no longer have access to it. You can reconnect anytime by saying "connect ${provider.replace(/_/g, " ")}".`,
     };
   }
 

@@ -81,6 +81,10 @@ export function createServer({ config, db, handler, adapters }: ServerDeps) {
         displayName: "Jira",
         prompt: "I just connected my Jira account. Show me my currently assigned issues — what's in progress, what's waiting, and anything that needs attention.",
       },
+      meta: {
+        displayName: "Instagram & Facebook",
+        prompt: "I just connected my Instagram and Facebook accounts. Show me which Facebook Pages I manage and my Instagram profile info.",
+      },
     };
     const meta = providerMeta[provider] || {
       displayName: provider,
@@ -255,6 +259,40 @@ export function createServer({ config, db, handler, adapters }: ServerDeps) {
         }
       } catch (err) {
         logger.error({ err, tenantId }, "Failed to seed daily Jira report job");
+      }
+    }
+
+    // Auto-seed daily Ads report when Google Ads is connected
+    if (provider === "google_ads" && db) {
+      try {
+        const existingAdsReport = await db.query.scheduledJobs.findFirst({
+          where: and(
+            eq(schema.scheduledJobs.tenantId, tenantId),
+            eq(schema.scheduledJobs.jobType, "daily_ads_report"),
+          ),
+        });
+
+        if (!existingAdsReport) {
+          const tenant = await db.query.tenants.findFirst({
+            where: eq(schema.tenants.id, tenantId),
+          });
+          const timezone = tenant?.timezone || "UTC";
+          const scheduledAt = nextUtcForLocalTime("09:00", timezone);
+
+          await db.insert(schema.scheduledJobs).values({
+            tenantId,
+            jobType: "daily_ads_report",
+            scheduleType: "daily",
+            scheduledAt,
+            recurrenceRule: "09:00",
+            payload: {},
+            status: "active",
+          });
+
+          logger.info({ tenantId, scheduledAt: scheduledAt.toISOString() }, "Seeded daily Ads report job on Google Ads connect");
+        }
+      } catch (err) {
+        logger.error({ err, tenantId }, "Failed to seed daily Ads report job");
       }
     }
     // Auto-complete connect_reminder if both Gmail and Calendar are now connected

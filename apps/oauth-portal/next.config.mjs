@@ -1,3 +1,5 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {};
+const nextConfig = {
+  assetPrefix: "/_portal",
+};
 export default nextConfig;

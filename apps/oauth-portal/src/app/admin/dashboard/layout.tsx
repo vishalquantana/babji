@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import { cookies } from "next/headers";
 import { isAdminAuthenticated } from "../../../lib/admin-auth";
 import { DashboardLayout } from "./layout-client";
 
@@ -17,8 +16,7 @@ export default async function AdminDashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const cookieStore = await cookies();
-  const authed = await isAdminAuthenticated(cookieStore);
+  const authed = await isAdminAuthenticated();
   if (!authed) redirect("/admin");
 
   const data = await fetchDashboardData();

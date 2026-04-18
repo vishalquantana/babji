@@ -1,30 +1,15 @@
 import type { Metadata } from "next";
-import { Inter, Lora, JetBrains_Mono, Outfit } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 
-const fontSans = Inter({
+const inter = Inter({
   variable: "--font-sans",
   subsets: ["latin"],
 });
 
-const fontSerif = Lora({
-  variable: "--font-serif",
-  subsets: ["latin"],
-});
-
-const fontMono = JetBrains_Mono({
-  variable: "--font-mono",
-  subsets: ["latin"],
-});
-
-const fontDisplay = Outfit({
-  variable: "--font-display",
-  subsets: ["latin"],
-});
-
 export const metadata: Metadata = {
-  title: "Babji | The Invisible Conductor",
-  description: "The world's first autonomous digital butler.",
+  title: "Babji | Your AI Business Assistant",
+  description: "Just tell Babji what you need — emails, calendar, ads, social media — and it handles the rest. Works on Telegram.",
 };
 
 export default function RootLayout({
@@ -34,9 +19,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${fontSans.variable} ${fontSerif.variable} ${fontMono.variable} ${fontDisplay.variable} antialiased bg-[var(--background)] text-[var(--foreground)]`}
-      >
+      <body className={`${inter.variable} font-sans antialiased`}>
         {children}
       </body>
     </html>

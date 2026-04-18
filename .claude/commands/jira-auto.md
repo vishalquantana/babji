@@ -305,7 +305,7 @@ Print a clearly visible blocker message with the ticket key, reason, and action 
 ### 4. Send Telegram Notification
 
 ```bash
-export $(cat .env.local | xargs) && curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+export $(cat .env.local | xargs) && curl -s "https://api.telegram.org/bot${ADMIN_BOT_TOKEN}/sendMessage" \
   -d "chat_id=${ADMIN_CHAT_ID}" \
   --data-urlencode "text=Jira ticket TICKET_KEY is blocked.
 

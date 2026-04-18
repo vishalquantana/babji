@@ -97,16 +97,18 @@ export async function ensureValidToken(
 
     const refreshed = await response.json() as {
       access_token: string;
+      refresh_token?: string;
       expires_in: number;
       token_type: string;
     };
 
     const newExpiresAt = Date.now() + refreshed.expires_in * 1000;
 
-    // Update the vault with the new access token (keep existing refresh_token and cloud_id)
+    // Update the vault with new access token and refresh token if rotated
+    // (Atlassian/Jira uses rotating refresh tokens — each refresh returns a new one)
     await vault.store(tenantId, provider, {
       access_token: refreshed.access_token,
-      refresh_token: tokenData.refresh_token,
+      refresh_token: refreshed.refresh_token || tokenData.refresh_token,
       expires_at: newExpiresAt,
       ...(tokenData.cloud_id ? { cloud_id: tokenData.cloud_id } : {}),
     });

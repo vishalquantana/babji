@@ -38,6 +38,7 @@ export const tenants = pgTable(
     briefingPref: varchar("briefing_pref", { length: 20 }).default("morning"),
     jiraReportPref: varchar("jira_report_pref", { length: 20 }).default("morning"),
     connectReminderStatus: varchar("connect_reminder_status", { length: 20 }).default("active"),
+    internalDomains: jsonb("internal_domains").$type<string[]>().default([]),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     lastActiveAt: timestamp("last_active_at").notNull().defaultNow(),
   },

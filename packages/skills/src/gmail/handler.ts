@@ -33,6 +33,15 @@ export class GmailHandler implements SkillHandler {
           params.subject as string,
           params.body as string
         );
+      case "create_draft":
+        this.requireParam(params, "to", actionName);
+        this.requireParam(params, "subject", actionName);
+        this.requireParam(params, "body", actionName);
+        return this.createDraft(
+          params.to as string,
+          params.subject as string,
+          params.body as string
+        );
       case "archive_emails":
         this.requireParam(params, "message_ids", actionName);
         return this.archiveEmails(params.message_ids as string[]);
@@ -160,6 +169,28 @@ export class GmailHandler implements SkillHandler {
       return { sent: true, messageId: res.data.id };
     } catch (err) {
       this.wrapApiError("send_email", err);
+    }
+  }
+
+  private async createDraft(to: string, subject: string, body: string) {
+    this.validateHeader(to, "to");
+    this.validateHeader(subject, "subject");
+
+    try {
+      const raw = Buffer.from(
+        `To: ${to}\r\nSubject: ${subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${body}`
+      ).toString("base64url");
+
+      const res = await this.gmail.users.drafts.create({
+        userId: "me",
+        requestBody: {
+          message: { raw },
+        },
+      });
+
+      return { drafted: true, draftId: res.data.id, messageId: res.data.message?.id };
+    } catch (err) {
+      this.wrapApiError("create_draft", err);
     }
   }
 

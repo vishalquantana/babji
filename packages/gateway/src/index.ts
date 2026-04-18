@@ -112,6 +112,7 @@ async function main() {
     googleClientId: process.env.GOOGLE_CLIENT_ID || "",
     atlassianClientId: process.env.ATLASSIAN_CLIENT_ID || "",
     linkedinClientId: process.env.LINKEDIN_CLIENT_ID || "",
+    metaClientId: process.env.META_CLIENT_ID || "",
     googleAdsDeveloperToken: config.googleAdsDeveloperToken,
     peopleConfig: config.people,
     googleApiKey: config.googleApiKey,
@@ -130,7 +131,7 @@ async function main() {
   const adapters: ChannelAdapter[] = [];
 
   if (config.telegram.enabled) {
-    const telegram = new TelegramAdapter(config.telegram.botToken, tenantResolver);
+    const telegram = new TelegramAdapter(config.telegram.botToken, tenantResolver, config.googleApiKey);
     telegram.onMessage(async (msg) => {
       const response = await handler.handle(msg);
       await telegram.sendMessage(response);
@@ -169,6 +170,7 @@ async function main() {
     } : undefined,
     adminNotifier,
     usageTracker,
+    googleAdsDeveloperToken: config.googleAdsDeveloperToken,
   });
   jobRunner.start();
 
@@ -269,6 +271,30 @@ async function main() {
             });
             logger.info({ tenantId: tenant.id }, "Seeded connect_reminder job for existing tenant");
           }
+        }
+      }
+
+      // Seed daily_ads_report for tenants with Google Ads connected
+      const hasGoogleAds = tenantConnections.some((c) => c.provider === "google_ads");
+      if (hasGoogleAds) {
+        const existingAdsReport = await db.query.scheduledJobs.findFirst({
+          where: and(
+            eq(schema.scheduledJobs.tenantId, tenant.id),
+            eq(schema.scheduledJobs.jobType, "daily_ads_report"),
+          ),
+        });
+        if (!existingAdsReport) {
+          const tz = tenant.timezone || "UTC";
+          await db.insert(schema.scheduledJobs).values({
+            tenantId: tenant.id,
+            jobType: "daily_ads_report",
+            scheduleType: "daily",
+            scheduledAt: nextUtcForLocalTime("09:00", tz),
+            recurrenceRule: "09:00",
+            payload: {},
+            status: "active",
+          });
+          logger.info({ tenantId: tenant.id }, "Seeded daily_ads_report job for existing tenant");
         }
       }
     }

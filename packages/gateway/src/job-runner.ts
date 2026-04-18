@@ -17,6 +17,7 @@ import { EmailDigestRunner } from "./email-digest.js";
 import { DailyBriefingService } from "./daily-briefing.js";
 import { MemoryScannerService } from "./memory-scanner.js";
 import { DailyJiraReportService } from "./daily-jira-report.js";
+import { DailyGoogleAdsReportService } from "./daily-ads-report.js";
 import type { UsageTracker } from "./usage-tracker.js";
 
 /** Converts a local time string like "07:30" + IANA timezone to the next UTC timestamp for that local time */
@@ -117,10 +118,12 @@ export interface JobRunnerDeps {
   };
   adminNotifier?: AdminNotifier;
   usageTracker?: UsageTracker;
+  googleAdsDeveloperToken?: string;
 }
 
 export class JobRunner {
   private intervalHandle: ReturnType<typeof setInterval> | null = null;
+  private lastTokenKeepAlive: Date | null = null;
 
   constructor(private deps: JobRunnerDeps) {}
 
@@ -142,6 +145,9 @@ export class JobRunner {
 
   private async tick(): Promise<void> {
     try {
+      // Run token keep-alive once per day
+      await this.maybeRunTokenKeepAlive();
+
       // Find jobs that are due
       const now = new Date();
       const dueJobs = await this.deps.db.query.scheduledJobs.findMany({
@@ -208,6 +214,18 @@ export class JobRunner {
         break;
       case "connect_reminder":
         await this.runConnectReminder(job);
+        break;
+      case "daily_ads_report":
+        await this.runDailyAdsReport(job);
+        break;
+      case "scheduled_linkedin_post":
+        await this.runScheduledLinkedInPost(job);
+        break;
+      case "scheduled_instagram_post":
+        await this.runScheduledInstagramPost(job);
+        break;
+      case "scheduled_facebook_post":
+        await this.runScheduledFacebookPost(job);
         break;
       default:
         logger.warn({ jobType: job.jobType }, "Unknown job type, skipping");
@@ -333,7 +351,8 @@ export class JobRunner {
         }
 
         if (tenantDomain) {
-          const meetings = briefingService.extractExternalAttendees(result.events, tenantDomain);
+          const internalDomains = ((tenant as Record<string, unknown>).internalDomains as string[]) || [];
+          const meetings = briefingService.extractExternalAttendees(result.events, tenantDomain, undefined, internalDomains);
 
           if (meetings.length > 0) {
             const pref = tenant.meetingBriefingPref as string | null;
@@ -810,8 +829,9 @@ export class JobRunner {
         peopleConfig: this.deps.peopleConfig!,
       });
 
+      const internalDomainsScan = ((tenant as Record<string, unknown>).internalDomains as string[]) || [];
       const meetings = briefingService.extractExternalAttendees(
-        result.events, tenantDomain,
+        result.events, tenantDomain, undefined, internalDomainsScan,
       );
 
       // Research new attendees not yet in profile_directory
@@ -1275,7 +1295,8 @@ export class JobRunner {
               time_min: timeMinISO, time_max: timeMaxISO, max_results: 20,
             }) as { events: Array<Record<string, unknown>>; count: number };
 
-            const meetings = briefingServiceMtg.extractExternalAttendees(result.events, tenantDomain);
+            const internalDomainsMtg = ((tenant as Record<string, unknown>).internalDomains as string[]) || [];
+            const meetings = briefingServiceMtg.extractExternalAttendees(result.events, tenantDomain, undefined, internalDomainsMtg);
             if (meetings.length > 0) {
               const pref = tenant.meetingBriefingPref as string | null;
               if (pref === "disabled") {
@@ -1462,6 +1483,347 @@ export class JobRunner {
 
     // Reschedule for tomorrow
     await this.rescheduleDaily(job, timezone);
+  }
+
+  private async runDailyAdsReport(job: typeof schema.scheduledJobs.$inferSelect): Promise<void> {
+    const tenantId = job.tenantId;
+
+    const tenant = await this.deps.db.query.tenants.findFirst({
+      where: eq(schema.tenants.id, tenantId),
+    });
+    if (!tenant) {
+      logger.warn({ tenantId }, "Tenant not found for daily Ads report job");
+      return;
+    }
+
+    const timezone = tenant.timezone || "UTC";
+
+    const recipient = tenant.telegramUserId || tenant.phone;
+    const channel = tenant.telegramUserId ? "telegram" : "whatsapp";
+    if (!recipient) {
+      logger.warn({ tenantId }, "No recipient channel for daily Ads report");
+      await this.rescheduleDaily(job, timezone);
+      return;
+    }
+
+    const adapter = this.deps.adapters.find((a) => a.name === channel);
+    if (!adapter) {
+      logger.warn({ tenantId, channel }, "No adapter found for daily Ads report");
+      await this.rescheduleDaily(job, timezone);
+      return;
+    }
+
+    try {
+      const reportService = new DailyGoogleAdsReportService({
+        db: this.deps.db,
+        vault: this.deps.vault,
+        googleApiKey: this.deps.googleApiKey,
+        googleAdsDeveloperToken: this.deps.googleAdsDeveloperToken || "",
+      });
+
+      const message = await reportService.generateReport(tenant, timezone);
+
+      if (message) {
+        await adapter.sendMessage({
+          tenantId,
+          channel: channel as "telegram" | "whatsapp" | "app",
+          recipient,
+          text: message,
+        });
+        logger.info({ tenantId }, "Sent daily Google Ads report");
+      } else {
+        logger.info({ tenantId }, "Daily Ads report: nothing to report, silent skip");
+      }
+
+      if (this.deps.usageTracker) {
+        this.deps.usageTracker.logBackgroundJob({ tenantId, jobType: "daily_ads_report" }).catch(() => {});
+      }
+    } catch (err) {
+      logger.error({ err, tenantId }, "Daily Ads report failed");
+    }
+
+    await this.rescheduleDaily(job, timezone);
+  }
+
+  private async runScheduledLinkedInPost(job: typeof schema.scheduledJobs.$inferSelect): Promise<void> {
+    const tenantId = job.tenantId;
+    const payload = (job.payload || {}) as {
+      text: string;
+      image_url?: string;
+      article_url?: string;
+      article_title?: string;
+      visibility?: string;
+    };
+
+    if (!payload.text) {
+      logger.warn({ tenantId, jobId: job.id }, "Scheduled LinkedIn post has no text, marking completed");
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "completed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      return;
+    }
+
+    const tenant = await this.deps.db.query.tenants.findFirst({
+      where: eq(schema.tenants.id, tenantId),
+    });
+    if (!tenant) {
+      logger.warn({ tenantId }, "Tenant not found for scheduled LinkedIn post");
+      return;
+    }
+
+    // Get LinkedIn token
+    const tokenResult = await ensureValidToken(tenantId, "linkedin", this.deps.vault, this.deps.db);
+    if (!tokenResult || tokenResult.status === "expired") {
+      logger.warn({ tenantId }, "LinkedIn token expired for scheduled post");
+
+      // Notify user
+      const recipient = tenant.telegramUserId || tenant.phone;
+      const channel = tenant.telegramUserId ? "telegram" : "whatsapp";
+      const adapter = this.deps.adapters.find((a) => a.name === channel);
+      if (recipient && adapter) {
+        await adapter.sendMessage({
+          tenantId,
+          channel: channel as "telegram" | "whatsapp" | "app",
+          recipient,
+          text: `Your scheduled LinkedIn post couldn't be published because your LinkedIn connection has expired. Please reconnect by typing "connect linkedin", and I'll help you reschedule the post.\n\nThe post was:\n"${payload.text.substring(0, 200)}${payload.text.length > 200 ? "..." : ""}"`,
+        });
+      }
+
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "completed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      return;
+    }
+
+    // Publish the post via LinkedIn API
+    try {
+      const { LinkedInHandler } = await import("@babji/skills");
+      const linkedin = new LinkedInHandler(tokenResult.accessToken, {
+        countTodayPosts: async () => 0, // No limit enforcement for scheduled posts
+      });
+
+      await linkedin.execute("create_post", {
+        text: payload.text,
+        image_url: payload.image_url,
+        article_url: payload.article_url,
+        article_title: payload.article_title,
+        visibility: payload.visibility || "PUBLIC",
+      });
+
+      logger.info({ tenantId, jobId: job.id }, "Scheduled LinkedIn post published successfully");
+
+      // Notify user
+      const recipient = tenant.telegramUserId || tenant.phone;
+      const channel = tenant.telegramUserId ? "telegram" : "whatsapp";
+      const adapter = this.deps.adapters.find((a) => a.name === channel);
+      if (recipient && adapter) {
+        await adapter.sendMessage({
+          tenantId,
+          channel: channel as "telegram" | "whatsapp" | "app",
+          recipient,
+          text: `Your scheduled LinkedIn post has been published!\n\n"${payload.text.substring(0, 150)}${payload.text.length > 150 ? "..." : ""}"`,
+        });
+      }
+
+      if (this.deps.usageTracker) {
+        this.deps.usageTracker.logBackgroundJob({ tenantId, jobType: "scheduled_linkedin_post" }).catch(() => {});
+      }
+    } catch (err) {
+      logger.error({ err, tenantId, jobId: job.id }, "Scheduled LinkedIn post failed");
+
+      // Notify user of failure
+      const recipient = tenant.telegramUserId || tenant.phone;
+      const channel = tenant.telegramUserId ? "telegram" : "whatsapp";
+      const adapter = this.deps.adapters.find((a) => a.name === channel);
+      if (recipient && adapter) {
+        const errMsg = err instanceof Error ? err.message : "unknown error";
+        await adapter.sendMessage({
+          tenantId,
+          channel: channel as "telegram" | "whatsapp" | "app",
+          recipient,
+          text: `Your scheduled LinkedIn post failed to publish: ${errMsg}\n\nThe post was:\n"${payload.text.substring(0, 200)}${payload.text.length > 200 ? "..." : ""}"`,
+        });
+      }
+    }
+
+    // One-time job — mark completed, don't reschedule
+    await this.deps.db.update(schema.scheduledJobs)
+      .set({ status: "completed", lastRunAt: new Date() })
+      .where(eq(schema.scheduledJobs.id, job.id));
+  }
+
+  private async runScheduledInstagramPost(job: typeof schema.scheduledJobs.$inferSelect): Promise<void> {
+    const tenantId = job.tenantId;
+    const payload = (job.payload || {}) as {
+      ig_user_id: string;
+      image_url: string;
+      caption?: string;
+    };
+
+    if (!payload.ig_user_id || !payload.image_url) {
+      logger.warn({ tenantId, jobId: job.id }, "Scheduled Instagram post missing required fields, marking completed");
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "completed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      return;
+    }
+
+    const tenant = await this.deps.db.query.tenants.findFirst({
+      where: eq(schema.tenants.id, tenantId),
+    });
+    if (!tenant) return;
+
+    const tokenResult = await ensureValidToken(tenantId, "meta", this.deps.vault, this.deps.db);
+    if (!tokenResult || tokenResult.status === "expired") {
+      const recipient = tenant.telegramUserId || tenant.phone;
+      const channel = tenant.telegramUserId ? "telegram" : "whatsapp";
+      const adapter = this.deps.adapters.find((a) => a.name === channel);
+      if (recipient && adapter) {
+        await adapter.sendMessage({
+          tenantId,
+          channel: channel as "telegram" | "whatsapp" | "app",
+          recipient,
+          text: `Your scheduled Instagram post couldn't be published because your Instagram connection has expired. Please reconnect by typing "connect instagram".\n\nCaption: "${(payload.caption || "").substring(0, 200)}"`,
+        });
+      }
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "completed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      return;
+    }
+
+    try {
+      const { InstagramHandler } = await import("@babji/skills");
+      const instagram = new InstagramHandler(tokenResult.accessToken);
+      await instagram.execute("create_post", {
+        ig_user_id: payload.ig_user_id,
+        image_url: payload.image_url,
+        caption: payload.caption,
+      });
+
+      logger.info({ tenantId, jobId: job.id }, "Scheduled Instagram post published");
+
+      const recipient = tenant.telegramUserId || tenant.phone;
+      const channel = tenant.telegramUserId ? "telegram" : "whatsapp";
+      const adapter = this.deps.adapters.find((a) => a.name === channel);
+      if (recipient && adapter) {
+        await adapter.sendMessage({
+          tenantId,
+          channel: channel as "telegram" | "whatsapp" | "app",
+          recipient,
+          text: `Your scheduled Instagram post has been published!\n\n"${(payload.caption || "").substring(0, 150)}"`,
+        });
+      }
+
+      if (this.deps.usageTracker) {
+        this.deps.usageTracker.logBackgroundJob({ tenantId, jobType: "scheduled_instagram_post" }).catch(() => {});
+      }
+    } catch (err) {
+      logger.error({ err, tenantId, jobId: job.id }, "Scheduled Instagram post failed");
+      const recipient = tenant.telegramUserId || tenant.phone;
+      const channel = tenant.telegramUserId ? "telegram" : "whatsapp";
+      const adapter = this.deps.adapters.find((a) => a.name === channel);
+      if (recipient && adapter) {
+        const errMsg = err instanceof Error ? err.message : "unknown error";
+        await adapter.sendMessage({
+          tenantId,
+          channel: channel as "telegram" | "whatsapp" | "app",
+          recipient,
+          text: `Your scheduled Instagram post failed to publish: ${errMsg}`,
+        });
+      }
+    }
+
+    await this.deps.db.update(schema.scheduledJobs)
+      .set({ status: "completed", lastRunAt: new Date() })
+      .where(eq(schema.scheduledJobs.id, job.id));
+  }
+
+  private async runScheduledFacebookPost(job: typeof schema.scheduledJobs.$inferSelect): Promise<void> {
+    const tenantId = job.tenantId;
+    const payload = (job.payload || {}) as {
+      page_id: string;
+      message: string;
+      link?: string;
+    };
+
+    if (!payload.page_id || !payload.message) {
+      logger.warn({ tenantId, jobId: job.id }, "Scheduled Facebook post missing required fields, marking completed");
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "completed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      return;
+    }
+
+    const tenant = await this.deps.db.query.tenants.findFirst({
+      where: eq(schema.tenants.id, tenantId),
+    });
+    if (!tenant) return;
+
+    const tokenResult = await ensureValidToken(tenantId, "meta", this.deps.vault, this.deps.db);
+    if (!tokenResult || tokenResult.status === "expired") {
+      const recipient = tenant.telegramUserId || tenant.phone;
+      const channel = tenant.telegramUserId ? "telegram" : "whatsapp";
+      const adapter = this.deps.adapters.find((a) => a.name === channel);
+      if (recipient && adapter) {
+        await adapter.sendMessage({
+          tenantId,
+          channel: channel as "telegram" | "whatsapp" | "app",
+          recipient,
+          text: `Your scheduled Facebook post couldn't be published because your Facebook connection has expired. Please reconnect by typing "connect facebook".\n\nPost: "${payload.message.substring(0, 200)}"`,
+        });
+      }
+      await this.deps.db.update(schema.scheduledJobs)
+        .set({ status: "completed", lastRunAt: new Date() })
+        .where(eq(schema.scheduledJobs.id, job.id));
+      return;
+    }
+
+    try {
+      const { FacebookPagesHandler } = await import("@babji/skills");
+      const facebook = new FacebookPagesHandler(tokenResult.accessToken);
+      await facebook.execute("create_post", {
+        page_id: payload.page_id,
+        message: payload.message,
+        link: payload.link,
+      });
+
+      logger.info({ tenantId, jobId: job.id }, "Scheduled Facebook post published");
+
+      const recipient = tenant.telegramUserId || tenant.phone;
+      const channel = tenant.telegramUserId ? "telegram" : "whatsapp";
+      const adapter = this.deps.adapters.find((a) => a.name === channel);
+      if (recipient && adapter) {
+        await adapter.sendMessage({
+          tenantId,
+          channel: channel as "telegram" | "whatsapp" | "app",
+          recipient,
+          text: `Your scheduled Facebook post has been published!\n\n"${payload.message.substring(0, 150)}"`,
+        });
+      }
+
+      if (this.deps.usageTracker) {
+        this.deps.usageTracker.logBackgroundJob({ tenantId, jobType: "scheduled_facebook_post" }).catch(() => {});
+      }
+    } catch (err) {
+      logger.error({ err, tenantId, jobId: job.id }, "Scheduled Facebook post failed");
+      const recipient = tenant.telegramUserId || tenant.phone;
+      const channel = tenant.telegramUserId ? "telegram" : "whatsapp";
+      const adapter = this.deps.adapters.find((a) => a.name === channel);
+      if (recipient && adapter) {
+        const errMsg = err instanceof Error ? err.message : "unknown error";
+        await adapter.sendMessage({
+          tenantId,
+          channel: channel as "telegram" | "whatsapp" | "app",
+          recipient,
+          text: `Your scheduled Facebook post failed to publish: ${errMsg}`,
+        });
+      }
+    }
+
+    await this.deps.db.update(schema.scheduledJobs)
+      .set({ status: "completed", lastRunAt: new Date() })
+      .where(eq(schema.scheduledJobs.id, job.id));
   }
 
   private async runConnectReminder(job: typeof schema.scheduledJobs.$inferSelect): Promise<void> {
@@ -1698,6 +2060,109 @@ export class JobRunner {
       .where(eq(schema.scheduledJobs.id, job.id));
 
     logger.info({ jobId: job.id, recurrence, nextRun: nextRun.toISOString() }, "Rescheduled recurring todo reminder");
+  }
+
+  private async maybeRunTokenKeepAlive(): Promise<void> {
+    const now = new Date();
+    // Run once per day (or on first tick after startup)
+    if (this.lastTokenKeepAlive) {
+      const hoursSinceLast = (now.getTime() - this.lastTokenKeepAlive.getTime()) / (1000 * 60 * 60);
+      if (hoursSinceLast < 24) return;
+    }
+
+    this.lastTokenKeepAlive = now;
+
+    try {
+      // Get all active service connections
+      const connections = await this.deps.db.query.serviceConnections.findMany();
+
+      if (connections.length === 0) return;
+
+      logger.info({ count: connections.length }, "Token keep-alive: refreshing all service connections");
+
+      let refreshed = 0;
+      let valid = 0;
+      let expired = 0;
+      const expiredConnections: { tenantId: string; provider: string }[] = [];
+
+      for (const conn of connections) {
+        try {
+          const result = await ensureValidToken(conn.tenantId, conn.provider, this.deps.vault, this.deps.db);
+          if (!result) continue;
+
+          if (result.status === "refreshed") refreshed++;
+          else if (result.status === "valid") valid++;
+          else if (result.status === "expired") {
+            expired++;
+            expiredConnections.push({ tenantId: conn.tenantId, provider: conn.provider });
+            logger.warn(
+              { tenantId: conn.tenantId, provider: conn.provider },
+              "Token keep-alive: refresh failed, token expired",
+            );
+          }
+        } catch (err) {
+          expired++;
+          expiredConnections.push({ tenantId: conn.tenantId, provider: conn.provider });
+          logger.error(
+            { err, tenantId: conn.tenantId, provider: conn.provider },
+            "Token keep-alive: error refreshing token",
+          );
+        }
+      }
+
+      logger.info({ refreshed, valid, expired, total: connections.length }, "Token keep-alive complete");
+
+      // Proactively notify users about expired tokens so they can reconnect
+      if (expiredConnections.length > 0) {
+        await this.notifyExpiredTokens(expiredConnections);
+      }
+    } catch (err) {
+      logger.error({ err }, "Token keep-alive sweep failed");
+    }
+  }
+
+  private async notifyExpiredTokens(
+    expiredConnections: { tenantId: string; provider: string }[],
+  ): Promise<void> {
+    // Group by tenant
+    const byTenant = new Map<string, string[]>();
+    for (const { tenantId, provider } of expiredConnections) {
+      const providers = byTenant.get(tenantId) || [];
+      providers.push(provider);
+      byTenant.set(tenantId, providers);
+    }
+
+    for (const [tenantId, providers] of byTenant) {
+      try {
+        const tenant = await this.deps.db.query.tenants.findFirst({
+          where: eq(schema.tenants.id, tenantId),
+        });
+        if (!tenant) continue;
+
+        const recipient = tenant.telegramUserId || tenant.phone;
+        const channel = tenant.telegramUserId ? "telegram" : "whatsapp";
+        if (!recipient) continue;
+
+        const adapter = this.deps.adapters.find((a) => a.name === channel);
+        if (!adapter) continue;
+
+        const providerNames = providers
+          .map((p) => p.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()))
+          .join(", ");
+        const reconnectCmds = providers.map((p) => `"connect ${p}"`).join(" or ");
+
+        await adapter.sendMessage({
+          tenantId,
+          channel: channel as "telegram" | "whatsapp" | "app",
+          recipient,
+          text: `Heads up -- your ${providerNames} connection needs to be refreshed. Your daily reports and automations for ${providerNames.toLowerCase()} won't work until you reconnect. Just type ${reconnectCmds} and I'll get it sorted.`,
+        });
+
+        logger.info({ tenantId, providers }, "Sent token expiry notification to user");
+      } catch (err) {
+        logger.error({ err, tenantId }, "Failed to send token expiry notification");
+      }
+    }
   }
 
   private getGreeting(timezone: string): string {

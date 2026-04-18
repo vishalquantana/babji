@@ -58,10 +58,19 @@ export class MeetingBriefingService {
     events: Array<Record<string, unknown>>,
     tenantDomain: string,
     tenantEmail?: string,
+    internalDomains?: string[],
   ): MeetingWithExternals[] {
     const results: MeetingWithExternals[] = [];
     const seenEmails = new Set<string>();
     let totalAttendees = 0;
+
+    // Build set of internal domains (explicit list + inferred base-name matching)
+    const explicitDomains = new Set(
+      (internalDomains || []).map(d => d.toLowerCase()),
+    );
+    // Always include the inferred tenant domain
+    explicitDomains.add(tenantDomain.toLowerCase());
+    const tenantBase = tenantDomain.toLowerCase().split(".")[0];
 
     for (const event of events) {
       if (results.length >= MAX_MEETINGS) break;
@@ -87,11 +96,12 @@ export class MeetingBriefingService {
         // Skip already-seen
         if (seenEmails.has(email.toLowerCase())) continue;
 
-        // Skip same organization (match base domain name across all TLDs)
-        // e.g. quantana.in, quantana.com.au, quantana.us all match "quantana"
+        // Skip internal domains (exact match against configured domains)
         const domain = email.split("@")[1]?.toLowerCase();
         if (!domain) continue;
-        const tenantBase = tenantDomain.toLowerCase().split(".")[0];
+        if (explicitDomains.has(domain)) continue;
+
+        // Skip same organization by base-name matching (e.g. quantana.in, quantana.com.au)
         const attendeeBase = domain.split(".")[0];
         if (attendeeBase === tenantBase) continue;
 

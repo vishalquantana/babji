@@ -19,6 +19,7 @@ interface DbDeps {
     aspectRatio: string;
     model: string;
   }) => Promise<void>;
+  createShortLink?: (url: string) => Promise<string | null>;
   tenantId: string;
 }
 
@@ -54,7 +55,7 @@ export class ImageGenHandler implements SkillHandler {
 
     const userName = this.userContext.name || "the user";
 
-    const metaprompt = `You are an expert image prompt engineer. Given a brief from a user named ${userName}, create a detailed image generation prompt that will produce a professional, high-quality result.
+    const metaprompt = `You are an expert image prompt engineer and graphic designer. Given a brief from a user named ${userName}, create a detailed image generation prompt that will produce a professional, high-quality result.
 
 Context about the user:
 ${memoryExcerpt}
@@ -68,10 +69,18 @@ Rules:
 - Suggest an aspect ratio based on the use case (poster = 3:4, social media post = 1:1, banner = 16:9, story = 9:16, landscape photo = 3:2)
 - Keep the enhanced prompt under 200 words
 - Do NOT include any text/words/letters in the image unless the user specifically requested text
-- Output valid JSON: { "enhanced_prompt": "...", "suggested_aspect_ratio": "...", "reasoning": "..." }`;
+
+Design principles for marketing materials:
+- For posters: use bold focal points, high contrast, clean hierarchy, generous whitespace, and eye-catching color combinations. Prefer modern minimalist or bold graphic styles over cluttered compositions.
+- For social media: vibrant colors, strong central subject, clean backgrounds that work at small sizes
+- For banners: wide compositions with space for text overlay, gradient backgrounds, professional photography style
+- For brand materials: maintain visual consistency, use complementary colors, professional lighting
+- Always specify a concrete visual style (e.g. "flat vector illustration", "cinematic photography", "3D render", "watercolor", "minimalist graphic design") rather than leaving it vague
+
+Output valid JSON: { "enhanced_prompt": "...", "suggested_aspect_ratio": "...", "reasoning": "..." }`;
 
     const response = await fetch(
-      `${GEMINI_API_BASE}/models/gemini-2.0-flash:generateContent?key=${this.googleApiKey}`,
+      `${GEMINI_API_BASE}/models/gemini-3.1-flash-lite-preview:generateContent?key=${this.googleApiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -216,6 +225,12 @@ Rules:
         aspectRatio: finalAspectRatio,
         model,
       });
+
+      // Create a short link for the S3 URL
+      if (this.dbDeps.createShortLink) {
+        const shortUrl = await this.dbDeps.createShortLink(s3Url);
+        if (shortUrl) s3Url = shortUrl;
+      }
     }
 
     return {

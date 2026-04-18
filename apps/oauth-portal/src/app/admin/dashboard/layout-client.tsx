@@ -2,7 +2,7 @@
 
 import { ReactNode } from "react";
 import { DashboardProvider, DashboardData } from "../../../components/admin/DashboardContext";
-import { Sidebar } from "../../../components/admin/Sidebar";
+import Sidebar from "../../../components/admin/Sidebar";
 
 export function DashboardLayout({
   data,

@@ -1,18 +1,22 @@
-import HeroSection from "@/components/HeroSection";
-import PillarsSection from "@/components/PillarsSection";
-import JuiceEconomy from "@/components/JuiceEconomy";
-import SkillsLearningSection from "@/components/SkillsLearningSection";
-import UseCasesSection from "@/components/UseCasesSection";
+import Hero from "@/components/Hero";
+import HowItWorks from "@/components/HowItWorks";
+import Integrations from "@/components/Integrations";
+import UseCases from "@/components/UseCases";
+import Testimonials from "@/components/Testimonials";
+import Pricing from "@/components/Pricing";
+import FAQ from "@/components/FAQ";
 import Footer from "@/components/Footer";
 
 export default function Home() {
   return (
-    <main className="min-h-screen font-sans selection:bg-juice selection:text-[#FDF8F5] flex flex-col pt-16">
-      <HeroSection />
-      <PillarsSection />
-      <UseCasesSection />
-      <SkillsLearningSection />
-      <JuiceEconomy />
+    <main className="min-h-screen">
+      <Hero />
+      <HowItWorks />
+      <Integrations />
+      <UseCases />
+      <Testimonials />
+      <Pricing />
+      <FAQ />
       <Footer />
     </main>
   );
