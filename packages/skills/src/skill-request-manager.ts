@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, and, or } from "drizzle-orm";
 import type { Database } from "@babji/db";
 import { schema } from "@babji/db";
 import type { SkillRequest } from "@babji/types";
@@ -18,6 +18,21 @@ export class SkillRequestManager {
     skillName: string,
     context: string,
   ): Promise<{ id: string }> {
+    // Deduplicate: if an open request for the same tenant+skill already exists, skip
+    const existing = await this.db.query.skillRequests.findFirst({
+      where: and(
+        eq(schema.skillRequests.tenantId, tenantId),
+        eq(schema.skillRequests.skillName, skillName),
+        or(
+          eq(schema.skillRequests.status, "pending"),
+          eq(schema.skillRequests.status, "in_progress"),
+        ),
+      ),
+    });
+    if (existing) {
+      return { id: existing.id };
+    }
+
     const [row] = await this.db
       .insert(schema.skillRequests)
       .values({ tenantId, skillName, context })
